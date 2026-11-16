@@ -303,8 +303,10 @@ Projects that used a per-owner `deploy-your-startup` copy switch once with
 `startup migrate deploy`.
 
 In the examples below, replace `<commit-sha>` with the commit of a release of
-this repository. Avoid `@main`: a moving reference changes production CI
-without review. See [releasing and pinning](docs/releasing.md).
+this repository. A job that calls `build-and-deploy-service.yml` must grant the
+permissions its nested jobs request, as shown: GitHub does not extend them to a
+reusable workflow of another owner, and the run fails to start without them.
+Avoid `@main`: a moving reference changes production CI without review. See [releasing and pinning](docs/releasing.md).
 Enable `run_lint` only after the service implements `./make.sh lint`; it defaults
 to false. Caller workflows need a `pull_request` trigger for checks before merge.
 With `run_lint`, the workflow also runs `startup lint-contract` from the CLI
@@ -336,6 +338,12 @@ on:
 jobs:
   build-and-deploy:
     uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<commit-sha>
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      packages: write
+      id-token: write
     with:
       service: frontend
       environment: production
@@ -397,6 +405,12 @@ jobs:
   deploy-services:
     needs: deploy-infrastructure
     uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<commit-sha>
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      packages: write
+      id-token: write
     with:
       service: backend
       environment: production
