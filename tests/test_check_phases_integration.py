@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize('failure', ['none', 'parallel', 'browser'])
 def test_browser_checks_wait_for_parallel_teardown_and_preserve_failures(tmp_path, failure):
     # GIVEN the shipped entrypoint and real pytest workers sharing a network boundary.
-    for name in ('make.sh', 'pyproject.toml', 'uv.lock'):
+    for name in ('make.sh', 'pyproject.toml', 'uv.lock', '.python-version'):
         shutil.copyfile(ROOT / name, tmp_path / name)
     tests = tmp_path / 'tests'
     tests.mkdir()
