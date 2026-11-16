@@ -93,6 +93,8 @@ jobs:
       revision: ${{ steps.runtime.outputs.revision }}
       reuse: ${{ steps.verified.outputs.reuse }}
       proof_id: ${{ steps.verified.outputs.proof_id }}
+      e2e_matrix: ${{ steps.e2e_matrix.outputs.value }}
+      e2e_run: ${{ steps.e2e_mode.outputs.run }}
     steps:
       - id: services
         name: Resolve service matrix
@@ -126,6 +128,38 @@ jobs:
               output.write("matrix=" + json.dumps({"include": result}) + "\n")
               output.write("lint=" + str(any(item["run_lint"] for item in result)).lower() + "\n")
           PYTHON
+
+      - id: e2e_matrix
+        name: Validate shard count
+        env:
+          SHARDS: ${{ inputs.e2e_shards }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          count = int(os.environ["SHARDS"])
+          if not 1 <= count <= 8:
+              raise SystemExit("shards must be an integer between 1 and 8")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("value=" + json.dumps(list(range(1, count + 1))) + "\n")
+          PYTHON
+      - id: e2e_mode
+        name: Select CI browser tests
+        env:
+          RUN_E2E: ${{ inputs.run_e2e }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          case "$RUN_E2E" in
+            true|false) ;;
+            *) echo '::error::RUN_E2E must be true or false'; exit 1 ;;
+          esac
+          if [ "$RUN_E2E" = false ] && [ "$PR_AUTHOR" != 'dependabot[bot]' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            echo '### E2E: disabled in CI' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Browser E2E was not executed in CI. Run all tests locally; CI does not verify that run.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            echo '### E2E: CI execution required' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: runtime
@@ -264,12 +298,12 @@ jobs:
 
   e2e:
     needs: prepare
-    if: needs.prepare.outputs.reuse != 'true'
-    uses: ./.github/workflows/container-e2e.yml
+    if: needs.prepare.outputs.reuse != 'true' && needs.prepare.outputs.e2e_run == 'true'
+    uses: ./.github/workflows/container-e2e-shards.yml
     permissions:
       contents: read
     with:
-      run_e2e: ${{ inputs.run_e2e }}
+      matrix: ${{ needs.prepare.outputs.e2e_matrix }}
       directory: ${{ inputs.e2e_directory }}
       shards: ${{ inputs.e2e_shards }}
       artifact_prefix: ${{ inputs.service }}
@@ -292,7 +326,7 @@ jobs:
           INTEGRATION_RESULT: ${{ needs.build.result }}
           IMAGE_RESULT: ${{ needs.image.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
-          RUN_E2E: 'true'
+          RUN_E2E: ${{ needs.prepare.outputs.e2e_run }}
         run: |
           test "$PREPARE_RESULT" = success
           if [ "$REUSE" = true ]; then
@@ -304,7 +338,11 @@ jobs:
           fi
           test "$INTEGRATION_RESULT" = success
           test "$IMAGE_RESULT" = success
-          if [ "$RUN_E2E" = true ]; then test "$E2E_RESULT" = success; fi
+          case "$RUN_E2E" in
+            true) test "$E2E_RESULT" = success ;;
+            false) test "$E2E_RESULT" = skipped ;;
+            *) exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: github.event_name == 'pull_request' && inputs.reuse_pr_build
