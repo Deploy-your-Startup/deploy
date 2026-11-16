@@ -21,10 +21,11 @@ SCRIPT = ROOT / ".github/actions/container-e2e/run.sh"
     ("false", "pull_request", "dependabot[bot]", "true"),
     ("true", "pull_request", "dependabot[bot]", "true"),
 ])
-def test_shared_e2e_mode_executes_the_actual_selection_step(tmp_path, mode, event, author, expected):
+@pytest.mark.parametrize("filename,step_id", [("container-e2e.yml", "mode"), ("verify-service-images.yml", "e2e_mode")])
+def test_shared_e2e_mode_executes_the_actual_selection_step(tmp_path, mode, event, author, expected, filename, step_id):
     # GIVEN the shipped workflow and the operator's repository execution policy.
-    workflow = yaml.load((ROOT / ".github/workflows/container-e2e.yml").read_text(), Loader=yaml.BaseLoader)
-    step = workflow["jobs"]["prepare"]["steps"][1]
+    workflow = yaml.load((ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader)
+    step = next(s for s in workflow["jobs"]["prepare"]["steps"] if s.get("id") == step_id)
     output, summary = tmp_path / "output", tmp_path / "summary"
     # WHEN the real selection command runs, before any browser image or test stack.
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env={
@@ -39,7 +40,7 @@ def test_shared_e2e_mode_executes_the_actual_selection_step(tmp_path, mode, even
     else:
         assert result.returncode == 0, result.stderr
         assert output.read_text() == "run=" + expected + "\n"
-        assert workflow["jobs"]["test"]["if"] == "needs.prepare.outputs.run == 'true'"
+
         if expected == "false":
             assert "not executed in CI" in summary.read_text()
             assert "does not verify that run" in summary.read_text()
@@ -53,6 +54,9 @@ def test_shared_e2e_mode_executes_the_actual_selection_step(tmp_path, mode, even
     ("success", "success", "failure", "true", 1),
     ("success", "success", "cancelled", "true", 1),
     ("success", "success", "skipped", "true", 1),
+    ("success", "success", "failure", "false", 1),
+    ("success", "success", "success", "false", 1),
+    ("success", "success", "skipped", "typo", 1),
 ])
 def test_gate_blocks_publish_unless_every_required_job_passes(integration, image, e2e, enabled, expected):
     # GIVEN the real reusable workflow and results from the GitHub boundary
@@ -162,23 +166,47 @@ def test_service_matrix_without_lint_skips_the_contract_gate(tmp_path):
 
 
 @pytest.mark.parametrize("shards,success", [("1", True), ("2", True), ("8", True), ("0", False), ("9", False), ("1.5", False)])
-def test_browser_matrix_runs_without_an_image_transfer_dependency(tmp_path, shards, success):
+@pytest.mark.parametrize("filename,step_id", [("container-e2e.yml", "matrix"), ("verify-service-images.yml", "e2e_matrix")])
+def test_browser_matrix_runs_without_an_image_transfer_dependency(tmp_path, shards, success, filename, step_id):
     # GIVEN the reusable workflow with a caller-provided shard count
     import json
-    workflow = yaml.load((ROOT / ".github/workflows/container-e2e.yml").read_text(), Loader=yaml.BaseLoader)
+    workflow = yaml.load((ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader)
     prepare = workflow["jobs"]["prepare"]
     output = tmp_path / "output"
-    assert len(prepare["steps"]) == 2
+    step = next(s for s in prepare["steps"] if s.get("id") == step_id)
     # WHEN its actual matrix preparation script executes
-    result = subprocess.run(["bash", "-e", "-c", prepare["steps"][0]["run"]],
+    result = subprocess.run(["bash", "-e", "-c", step["run"]],
         env={**os.environ, "SHARDS": shards, "GITHUB_OUTPUT": str(output)}, capture_output=True, text=True)
     # THEN every requested shard can build and test directly, without waiting for an image artifact
     assert (result.returncode == 0) is success, result.stderr
     if success:
         assert json.loads(output.read_text().removeprefix("value=")) == list(range(1, int(shards) + 1))
-    steps = workflow["jobs"]["test"]["steps"]
+    runner = yaml.load((ROOT / ".github/workflows/container-e2e-shards.yml").read_text(), Loader=yaml.BaseLoader)
+    assert set(runner["jobs"]) == {"test"}
+    steps = runner["jobs"]["test"]["steps"]
     build = next(step for step in steps if step.get("uses", "").startswith("docker/build-push-action@"))
     # The runner's own builder writes into its daemon; no tarball or cache export.
     assert not any(step.get("uses", "").startswith("docker/setup-buildx-action@") for step in steps)
     assert not {"load", "cache-to", "outputs"} & set(build["with"])
     assert not any(step.get("uses", "").startswith("actions/download-artifact@") for step in steps)
+
+
+def test_service_and_standalone_callers_share_the_validated_browser_runner():
+    # GIVEN both public entrypoints and their real workflow definitions.
+    workflows = ROOT / ".github/workflows"
+    service = yaml.load((workflows / "verify-service-images.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]
+    standalone = yaml.load((workflows / "container-e2e.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]
+    # WHEN the scheduler routes prepared shards to the shared runner.
+    assert service["e2e"]["uses"] == standalone["test"]["uses"] == "./.github/workflows/container-e2e-shards.yml"
+    assert service["e2e"]["if"] == "needs.prepare.outputs.reuse != 'true' && needs.prepare.outputs.e2e_run == 'true'"
+    assert service["e2e"]["with"]["matrix"] == "${{ needs.prepare.outputs.e2e_matrix }}"
+    assert service["checks"]["steps"][0]["env"]["RUN_E2E"] == "${{ needs.prepare.outputs.e2e_run }}"
+    assert service["prepare"]["outputs"]["e2e_run"] == "${{ steps.e2e_mode.outputs.run }}"
+    assert service["prepare"]["outputs"]["e2e_matrix"] == "${{ steps.e2e_matrix.outputs.value }}"
+    assert standalone["test"]["if"] == "needs.prepare.outputs.run == 'true'"
+    assert standalone["test"]["with"]["matrix"] == "${{ needs.prepare.outputs.matrix }}"
+    # THEN both paths execute identical selection/validation commands, without another service runner.
+    for standalone_id, service_id in [("matrix", "e2e_matrix"), ("mode", "e2e_mode")]:
+        first = next(s for s in standalone["prepare"]["steps"] if s.get("id") == standalone_id)
+        second = next(s for s in service["prepare"]["steps"] if s.get("id") == service_id)
+        assert first["run"] == second["run"]

@@ -39,6 +39,11 @@ decisions are recorded in [docs/adr](docs/adr/README.md).
 that forwards to this workflow. It keeps callers pinned to its name working;
 point new and updated references at `build-and-deploy-service.yml`.
 
+Service preparation also selects the E2E mode and validates the shard matrix;
+the browser runner needs no additional preparation job. Standalone container
+E2E callers keep their own preparation step. Disabled service E2E starts no
+browser jobs; Dependabot PRs still require E2E.
+
 Integration checks and the production image build run concurrently. With
 `run_e2e: true`, browser checks also run before the required-checks gate. A
 failed, cancelled or unexpectedly skipped check prevents publication and

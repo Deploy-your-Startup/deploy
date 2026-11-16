@@ -1,0 +1,70 @@
+name: Container E2E Shards
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: Validated JSON shard array from the preparation job
+        type: string
+        required: true
+      directory:
+        type: string
+        default: e2e_tests
+      shards:
+        type: number
+        default: 1
+      runtime_revision:
+        description: "Shared CI runtime resolved by the application workflow"
+        type: string
+        default: ''
+      artifact_prefix:
+        type: string
+        default: e2e
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/pin-ci-runtime@main
+        if: inputs.runtime_revision != ''
+        with:
+          revision: ${{ inputs.runtime_revision }}
+      # The runner's own Docker builder writes straight into the daemon. A
+      # buildx container builder would export a tarball and the GHA cache,
+      # which cost more than the uncached layers they save.
+      - name: Build browser image on this runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ${{ inputs.directory }}/Dockerfile
+          tags: startup-e2e:${{ github.run_id }}
+      - name: Run pinned isolated browser shard
+        if: inputs.runtime_revision != ''
+        uses: ./.git/startup-actions/container-e2e
+        with:
+          directory: ${{ inputs.directory }}
+          image: startup-e2e:${{ github.run_id }}
+          shard: ${{ matrix.shard }}
+          total: ${{ inputs.shards }}
+      - name: Run isolated browser shard
+        if: inputs.runtime_revision == ''
+        uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/container-e2e@main
+        with:
+          directory: ${{ inputs.directory }}
+          image: startup-e2e:${{ github.run_id }}
+          shard: ${{ matrix.shard }}
+          total: ${{ inputs.shards }}
+      - name: Preserve reports and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ inputs.artifact_prefix }}-e2e-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-reports/
+          if-no-files-found: error
+          retention-days: 7
