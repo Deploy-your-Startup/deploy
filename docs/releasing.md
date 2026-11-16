@@ -35,9 +35,11 @@ templates.
 
 ## Pinning a project's roles
 
-Resolve a reviewed owner-repository ref:
+Move the project to a release, or resolve a specific reviewed ref:
 
 ```sh
+startup update --check
+startup update
 startup ansible pin --working-directory deployment --version <reviewed-ref>
 ```
 
@@ -65,8 +67,9 @@ Point application workflows at a reviewed commit of the owner repository, not
 uses: <github-owner>/deploy-your-startup/.github/workflows/build-and-deploy-service.yml@<commit-sha>
 ```
 
-`startup ansible pin --version <release-tag>` writes that commit into the
-project's shared workflow references together with the role pin.
+`startup update` writes the release commit into the project's shared workflow
+references together with the role pin; `startup ansible pin --version
+<release-tag>` is the underlying step.
 
 Within a release, nested action references name the release tag. In commits
 synced before releases existed they name the owner repository's `main` and
