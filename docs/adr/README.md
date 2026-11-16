@@ -12,3 +12,4 @@ records from 0100. Supersede a record with a new one instead of rewriting it.
 | [0004](0004-separate-verification-and-publication.md) | Cancel obsolete verification while protecting application publication |
 | [0005](0005-local-or-ci-e2e.md) | Select local or CI browser verification without changing the test suite |
 | [0006](0006-one-build-workflow.md) | One service build workflow; the parallel name is a deprecated alias |
+| [0007](0007-synced-releases-are-self-contained.md) | Each sync is an immutable release whose references name its own tag |

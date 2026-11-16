@@ -23,16 +23,23 @@ startup sync --source-version <reviewed-revision> --dry-run
 startup sync --source-version <reviewed-revision>
 ```
 
-Sync copies this repository into `<github-owner>/deploy-your-startup`. It does
+Sync copies this repository into `<github-owner>/deploy-your-startup` and
+publishes that state as a release tag, named after the synced version
+(`v1.2.0`) or source commit (`source-<sha>`). In a release every reference to
+the owner copy names that tag, so it resolves its workflows, actions and roles
+from itself ([ADR 0007](adr/0007-synced-releases-are-self-contained.md)).
+`--tag-only` publishes the release without moving `main`. Sync does
 not update existing workflow references or role pins in projects. Do not
 confuse it with `startup template update` (Copier), which updates application
 templates.
 
 ## Pinning a project's roles
 
-Resolve a reviewed owner-repository ref:
+Move the project to a release, or resolve a specific reviewed ref:
 
 ```sh
+startup update --check
+startup update
 startup ansible pin --working-directory deployment --version <reviewed-ref>
 ```
 
@@ -60,11 +67,15 @@ Point application workflows at a reviewed commit of the owner repository, not
 uses: <github-owner>/deploy-your-startup/.github/workflows/build-and-deploy-service.yml@<commit-sha>
 ```
 
-In the build workflow, `pin-ci-runtime` loads the shared test, coverage,
-build-evidence and browser actions from the same commit as the caller's
-reference. The `deploy` and `export-shared-roles` actions follow the project's
-`shared-roles.ref` when it exists. Other nested action references in the other shared
-workflows still use the owner repository's `main`.
+`startup update` writes the release commit into the project's shared workflow
+references together with the role pin; `startup ansible pin --version
+<release-tag>` is the underlying step.
+
+Within a release, nested action references name the release tag. In commits
+synced before releases existed they name the owner repository's `main` and
+follow every sync; adopt a release once to close that gap. Independently,
+`pin-ci-runtime` loads the shared build actions from the caller's workflow
+commit, and `deploy` and `export-shared-roles` follow `shared-roles.ref`.
 
 ## Credentials in CI
 
