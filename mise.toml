@@ -13,3 +13,7 @@ run = "./make.sh check"
 [tasks.format]
 description = "No formatter configured; kept for the make.sh contract"
 run = "./make.sh format"
+
+[tasks.release]
+description = "Publish the remote main as an immutable release: mise run release v1.2.0"
+run = "uv run --locked python scripts/release.py"

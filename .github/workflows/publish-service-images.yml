@@ -39,7 +39,7 @@ jobs:
       current: ${{ steps.current.outputs.current }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/pin-ci-runtime@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
         with:
           revision: ${{ inputs.revision }}
       - id: current
@@ -63,7 +63,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/pin-ci-runtime@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
         if: inputs.reuse == 'true'
         with:
           revision: ${{ inputs.revision }}
@@ -99,9 +99,9 @@ jobs:
           skopeo copy --all --authfile "$HOME/.docker/config.json" \
             "docker://$IMAGE:$TAG" "docker://$IMAGE:latest"
       - name: Wait for infrastructure
-        uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/wait-for-infrastructure@main
+        uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
       - name: Deploy service
-        uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/actions/deploy@main
+        uses: Deploy-your-Startup/deploy/.github/actions/deploy@main
         with:
           environment: ${{ inputs.environment }}
           service: ${{ matrix.service }}

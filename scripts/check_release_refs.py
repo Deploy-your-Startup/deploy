@@ -1,9 +1,9 @@
 """Check that this repository's references to itself form one immutable release.
 
-The template refers to the owner copy's ``main``; `startup sync` rewrites those
-references to a tag it creates on the published commit. Either form is valid.
-A mix, or a tag that holds different contents, means a later sync could change
-what a pinned project runs.
+On ``main`` this repository refers to its own actions at ``main``;
+`scripts/release.py` rewrites those references to the tag it creates on the
+release commit. Either form is valid. A mix, or a tag that holds different
+contents, means a later merge could change what a pinned project runs.
 """
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-TEMPLATE = "§§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§"
+SELF = "Deploy-your-Startup/deploy"
 
 
 def self_references(root, repositories):
@@ -24,14 +24,14 @@ def self_references(root, repositories):
 
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    repositories = [TEMPLATE, *filter(None, [os.environ.get("GITHUB_REPOSITORY")])]
+    repositories = [SELF, *filter(None, [os.environ.get("GITHUB_REPOSITORY")])]
     found = list(self_references(root, repositories))
     references = {reference for _path, reference in found}
     if len(references) > 1:
         lines = "\n".join(f"  {path}: @{reference}" for path, reference in found)
         raise SystemExit("References to this repository must share one revision:\n" + lines)
     if references <= {"main"}:
-        print(f"{len(found)} references follow main: not a synced release")
+        print(f"{len(found)} references follow main: not a release")
         return
 
     def tree(revision):

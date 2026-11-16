@@ -2,7 +2,7 @@
 
 Deploy self-hosted, cookieless KPI tracking using the pinned upstream Umami
 image (`3.4.0`). There is no application source, Dockerfile or build workflow.
-Security updates reach consumers through `startup sync` and a reviewed project
+Security updates reach consumers through a release and a reviewed project
 shared-role pin. Replays and heatmaps stay off.
 
 Projects guard the role in their own playbook; the role does not define a toggle:
@@ -99,8 +99,8 @@ forwarded headers before the auth subrequest so public backend routes and forged
 headers cannot bypass authentication. The OAuth mode requires Traefik's
 `traefik.io/v1alpha1` Middleware CRD.
 
-After `startup sync`, review and commit the new immutable role pin and matching
-workflow references. Existing projects do not adopt this feature just by syncing.
+After `startup update`, review and commit the new immutable role pin and matching
+workflow references. Existing projects adopt this feature only with that update.
 
 ## Safe first run
 

@@ -1,8 +1,8 @@
 # Deploy Your Startup — shared deployment foundation
 
 This repository contains the shared deploy workflows, composite actions, and
-Ansible roles that Deploy Your Startup users sync into their own private
-`deploy-your-startup` repository.
+Ansible roles that Deploy Your Startup projects call directly and pin to a
+release.
 
 It combines the reusable GitHub Actions logic with the shared deployment assets
 so projects can reuse one deployment foundation for each new startup. Workflows
@@ -294,18 +294,17 @@ esac
 
 ## Usage in Your Projects
 
-Run `startup sync` to copy this template into your own private
-`<github-owner>/deploy-your-startup` repository. Projects resolve shared roles
-from that user copy. Editing this template alone does not update projects;
-run `startup sync` again after the upstream change is available, then let
-`startup ansible setup_ansible` refresh the local checkout. Do not hand-edit
-`deployment/.shared-roles`.
+Projects call this public repository directly and pin one release: the
+workflow references and `deployment/shared-roles.ref` name the same release
+commit. Merging here changes no project; `startup update` moves a project to
+the latest release as a reviewable change, and `startup ansible setup_ansible`
+refreshes the local checkout. Do not hand-edit `deployment/.shared-roles`.
+Projects that used a per-owner `deploy-your-startup` copy switch once with
+`startup migrate shared-source`.
 
-The `§§deploy_your_startup.*§§` placeholders below are rendered by sync. In a
-project workflow, replace them with your GitHub owner and shared repository name,
-and `<commit-sha>` with a reviewed commit of that repository. Avoid `@main`: a
-moving reference changes production CI without review. See
-[releasing and pinning](docs/releasing.md).
+In the examples below, replace `<commit-sha>` with the commit of a release of
+this repository. Avoid `@main`: a moving reference changes production CI
+without review. See [releasing and pinning](docs/releasing.md).
 Enable `run_lint` only after the service implements `./make.sh lint`; it defaults
 to false. Caller workflows need a `pull_request` trigger for checks before merge.
 With `run_lint`, the workflow also runs `startup lint-contract` from the CLI
@@ -336,7 +335,7 @@ on:
 
 jobs:
   build-and-deploy:
-    uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/workflows/build-and-deploy-service.yml@<commit-sha>
+    uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<commit-sha>
     with:
       service: frontend
       environment: production
@@ -372,7 +371,7 @@ jobs:
   
   deploy:
     needs: pre-deploy
-    uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/workflows/deploy.yml@<commit-sha>
+    uses: Deploy-your-Startup/deploy/.github/workflows/deploy.yml@<commit-sha>
     with:
       environment: production
     secrets:
@@ -389,7 +388,7 @@ on:
 
 jobs:
   deploy-infrastructure:
-    uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/workflows/deploy-infrastructure.yml@<commit-sha>
+    uses: Deploy-your-Startup/deploy/.github/workflows/deploy-infrastructure.yml@<commit-sha>
     with:
       environment: production
     secrets:
@@ -397,7 +396,7 @@ jobs:
       
   deploy-services:
     needs: deploy-infrastructure
-    uses: §§deploy_your_startup.github_username§§/§§deploy_your_startup.deploy_repo_name§§/.github/workflows/build-and-deploy-service.yml@<commit-sha>
+    uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<commit-sha>
     with:
       service: backend
       environment: production
@@ -436,7 +435,7 @@ your-project/
 
 ## Shared infrastructure roles
 
-Projects load shared roles from their synced deployment checkout:
+Projects load shared roles from their pinned `.shared-roles` checkout:
 
 | Role | Purpose and configuration |
 | --- | --- |

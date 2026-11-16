@@ -2,7 +2,7 @@
 
 Deploy the pinned upstream image as shared infrastructure. There is no
 application source, Dockerfile or build workflow. Updates reach consumers
-through `startup sync` and a reviewed project shared-role pin.
+through a release and a reviewed project shared-role pin.
 
 Projects guard the role in their own playbook; the role does not define a toggle:
 
