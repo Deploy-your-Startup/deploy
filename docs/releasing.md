@@ -1,7 +1,7 @@
 # Releasing and pinning
 
 Merging to `main` here changes no project. A change reaches an application only
-after the owner syncs it and reviews the project's pin; see
+after it is released and the project adopts that release; see
 [role distribution](role-distribution.md) for the path.
 
 ## Verification before release
@@ -14,71 +14,83 @@ join-key window. Review optional charts and provider settings separately.
 Static checks do not establish successful provisioning or production readiness.
 
 A feature that needs a CLI change is usable only once that CLI is released;
-state the minimum CLI version in the change description.
+state the minimum CLI version in the release notes.
 
-## Syncing into the owner repository
+## Publishing a release
+
+Check out the merged `main` without local changes, then run:
 
 ```sh
-startup sync --source-version <reviewed-revision> --dry-run
-startup sync --source-version <reviewed-revision>
+mise run release v1.2.0
 ```
 
-Sync copies this repository into `<github-owner>/deploy-your-startup` and
-publishes that state as a release tag, named after the synced version
-(`v1.2.0`) or source commit (`source-<sha>`). In a release every reference to
-the owner copy names that tag, so it resolves its workflows, actions and roles
-from itself ([ADR 0007](adr/0007-synced-releases-are-self-contained.md)).
-`--tag-only` publishes the release without moving `main`. Sync does
-not update existing workflow references or role pins in projects. Do not
-confuse it with `startup template update` (Copier), which updates application
-templates.
+`scripts/release.py` refuses anything but the commit at the remote `main` and a
+version tag that does not exist yet. It rewrites every
+`uses: Deploy-your-Startup/deploy/.github/...@main` to the version tag, commits
+that on top of `main`, checks the result with `scripts/check_release_refs.py`
+and pushes only the annotated tag. The release therefore resolves its workflows,
+actions and roles from itself
+([ADR 0007](adr/0007-releases-are-self-contained.md)). `main` keeps its `@main`
+references. The tag ruleset lets only maintainers create tags, and published
+tags never move. The script prints the release commit that projects pin.
+
+A fork releases the same way; pass `--repository <owner>/<fork>` if its remote
+is not a GitHub URL. Its releases then refer to the fork.
 
 ## Pinning a project's roles
 
-Move the project to a release, or resolve a specific reviewed ref:
+Move the project to the latest release, or to a specific release:
 
 ```sh
 startup update --check
 startup update
-startup ansible pin --working-directory deployment --version <reviewed-ref>
+startup ansible pin --working-directory deployment --version <release-tag>
 ```
 
 Commit `shared-roles.ref` and `shared-roles.sha256` with the CLI dependency and
 lock file. Subsequent runs use that immutable commit. CI exports must match the
 checksum of role files and runtime configuration, even without Git metadata; a
-mismatch fails before any role executes. The first Git-backed setup records the
-resolved commit automatically. Advancing the owner repository's `main` alone
-does not change a pinned project.
+mismatch fails before any role executes. Merging to `main` here does not change
+a pinned project.
 
 When `deployment/shared-roles.ref` exists, the `deploy` and
 `export-shared-roles` actions dispatch to the action code at that exact commit.
 Projects without a pin use the action's current revision. A runtime-equivalent
 commit can change action code while leaving the role checksum unchanged, so
-review the action diff too. Projects pinned before the standalone exporter
-existed must move to a revision that contains it before relying on the
-pre-deploy checksum check.
+review the action diff too.
 
 ## Pinning workflow references
 
-Point application workflows at a reviewed commit of the owner repository, not
-`@main`:
+Point application workflows at the release commit, not `@main`:
 
 ```yaml
-uses: <github-owner>/deploy-your-startup/.github/workflows/build-and-deploy-service.yml@<commit-sha>
+uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<release-commit>
 ```
 
 `startup update` writes the release commit into the project's shared workflow
 references together with the role pin; `startup ansible pin --version
-<release-tag>` is the underlying step.
+<release-tag>` is the underlying step. Independently, `pin-ci-runtime` loads the
+shared build actions from the caller's workflow commit, and `deploy` and
+`export-shared-roles` follow `shared-roles.ref`.
 
-Within a release, nested action references name the release tag. In commits
-synced before releases existed they name the owner repository's `main` and
-follow every sync; adopt a release once to close that gap. Independently,
-`pin-ci-runtime` loads the shared build actions from the caller's workflow
-commit, and `deploy` and `export-shared-roles` follow `shared-roles.ref`.
+## Moving from an owner copy
+
+Projects that call a per-owner `<github-owner>/deploy-your-startup` copy switch
+once:
+
+```sh
+startup migrate deploy --dry-run
+startup migrate deploy
+```
+
+It points the workflow references and `shared-roles.ref` at the current release
+of this repository and refreshes `deployment/.shared-roles`; review and commit
+the result. Archive the owner copy only after all its projects have moved, and
+do not delete it, so the old pins stay available for a rollback.
 
 ## Credentials in CI
 
 The workflows take the caller's `VAULT_PASSWORD` secret and pass it to the CLI
 as the scoped `STARTUP_VAULT_PASSWORD` environment variable. The CLI streams
 the deploy key directly to `ssh-add`; no password enters a process argument.
+Callers pass secrets explicitly; `secrets: inherit` does not cross owners.

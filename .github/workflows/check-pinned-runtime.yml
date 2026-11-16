@@ -22,8 +22,8 @@ jobs:
               break
             fi
           done < <(git rev-list --skip=1 --max-count=100 HEAD)
-          # Synced owner repositories have different commit IDs from the source.
-          # A first sync has no historical runtime; still verify its immutable HEAD.
+          # A history without an earlier runtime (a fresh fork) still verifies
+          # its immutable HEAD.
           printf '%s\n' "$revision" > deployment/shared-roles.ref
       - name: WHEN exporting the project's reviewed runtime through native GitHub actions
         uses: ./.github/actions/export-shared-roles
@@ -55,7 +55,7 @@ jobs:
         env:
           REUSE: ${{ steps.fallback.outputs.reuse }}
         run: test "$REUSE" = false
-      # A synced owner copy must be one release: every reference to itself
-      # names the tag that holds exactly these contents.
+      # main follows itself at @main; a release names only the tag that holds
+      # exactly these contents.
       - name: Check that references to this repository form one release
         run: python3 scripts/check_release_refs.py

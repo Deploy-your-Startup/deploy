@@ -47,33 +47,33 @@ def test_pin_dispatch_rejects_mutable_or_malformed_revisions(tmp_path, revision)
 
 
 @pytest.mark.parametrize('history', ['existing-runtime', 'readme-only', 'first-commit'])
-def test_synced_workflow_selects_a_pin_that_exists_in_the_owner_repository(tmp_path, history):
-    # GIVEN an independent owner repository, whose commit IDs differ from the template.
+def test_runtime_check_selects_a_pin_that_exists_in_its_own_history(tmp_path, history):
+    # GIVEN this repository or a fork, with or without an earlier runtime in its history.
     def git(*args):
         return subprocess.check_output(['git', '-C', str(tmp_path), *args], text=True).strip()
     git('init', '-b', 'main')
     git('config', 'user.name', 'Integration Test')
     git('config', 'user.email', 'test@example.invalid')
     if history != 'first-commit':
-        (tmp_path / 'README.md').write_text('owner repository\n')
+        (tmp_path / 'README.md').write_text('fork\n')
         if history == 'existing-runtime':
             action = tmp_path / '.github/actions/export-shared-roles/action.yml'
             action.parent.mkdir(parents=True)
             action.write_text('name: Earlier runtime\n')
         git('add', '.')
-        git('commit', '-m', 'owner history')
+        git('commit', '-m', 'earlier history')
         previous = git('rev-parse', 'HEAD')
     action = tmp_path / '.github/actions/export-shared-roles/action.yml'
     action.parent.mkdir(parents=True, exist_ok=True)
-    action.write_text('name: Synced runtime\n')
+    action.write_text('name: Current runtime\n')
     git('add', '.')
-    git('commit', '-m', 'sync')
+    git('commit', '-m', 'current')
     expected = previous if history == 'existing-runtime' else git('rev-parse', 'HEAD')
     workflow = yaml.load((ROOT / '.github/workflows/check-pinned-runtime.yml').read_text(), Loader=yaml.BaseLoader)
-    # WHEN the actual synced workflow selects its fixture pin.
+    # WHEN the actual runtime check selects its fixture pin.
     script = workflow['jobs']['pinned-runtime']['steps'][1]['run']
     subprocess.run(['bash', '-e', '-c', script], cwd=tmp_path, check=True)
-    # THEN it resolves locally even on first adoption, without a template-only SHA.
+    # THEN it resolves locally even without an earlier runtime.
     selected = (tmp_path / 'deployment/shared-roles.ref').read_text().strip()
     assert selected == expected
     assert git('cat-file', '-t', selected) == 'commit'

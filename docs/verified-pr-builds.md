@@ -24,12 +24,9 @@ in this mechanism. Cloudflare Pages workflows do not reuse PR evidence; their
 existing checks remain unchanged.
 
 The first PR after adoption runs in full and creates the evidence for its push.
-An existing project must reference a shared revision containing this feature.
-Run `startup sync --source-version <reviewed-revision> --dry-run`, review the
-changes, then sync that revision into the owner's shared deployment repository.
-Update the application's workflow reference to the resulting immutable commit
-in that owner repository. Syncing does not update existing caller pins. Do not
-confuse shared deployment sync with `startup template update` (Copier).
+An existing project must pin a release containing this feature: run
+`startup update` and review the new workflow references and role pin. Do not
+confuse it with `startup template update` (Copier).
 
 Jobs selecting or restoring evidence require `actions: read`, `contents: read`
 and `pull-requests: read` to recover the merged PR associated with its commit. PR jobs

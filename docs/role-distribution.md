@@ -5,24 +5,23 @@ Notes for contributors. Users follow [Usage in Your Projects](../README.md#usage
 ## How a change reaches a project
 
 ```
-Deploy-your-Startup/deploy-template     source of truth
-        │  startup sync                 copies it into the owner's account
+Deploy-your-Startup/deploy              source of truth (or an owner's fork)
+        │  mise run release vX.Y.Z      publishes a self-contained release tag
         ▼
-<github-owner>/deploy-your-startup      per-owner copy that projects clone
-        │  startup ansible setup_ansible
+release commit                          what projects pin
+        │  startup update / startup ansible setup_ansible
         ▼
 <project>/deployment/.shared-roles      gitignored working copy at the pinned ref
 ```
 
-The owner is inferred from the project's own Git remote; the repository name is
-fixed (`DEFAULT_SHARED_REPO_NAME` in the CLI). Merging here is only the first
-hop: no project runs the change until the owner syncs and reviews its role pin.
-The same applies to the shared workflows. Sync, pinning and release
-verification are described in [releasing](releasing.md).
+Merging here is only the first hop: no project runs the change until it is
+released and the project adopts that release with a reviewed pin. The same
+applies to the shared workflows. Releasing, pinning and release verification are
+described in [releasing](releasing.md).
 
-To test an unmerged role change against a real project, push the branch to the
-owner copy and pass `--version <branch>`; `setup_ansible` fetches and checks out
-any ref in that repository. The CLI refuses to treat a modified `.shared-roles`
+To test an unmerged role change against a real project, push the branch to this
+repository or a fork and pass `--version <branch>`; `setup_ansible` fetches and
+checks out any ref in that repository. The CLI refuses to treat a modified `.shared-roles`
 checkout as up to date, so never hand-edit it.
 
 ## Shared playbooks cannot see project `group_vars`
