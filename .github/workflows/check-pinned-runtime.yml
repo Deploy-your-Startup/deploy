@@ -55,3 +55,7 @@ jobs:
         env:
           REUSE: ${{ steps.fallback.outputs.reuse }}
         run: test "$REUSE" = false
+      # A synced owner copy must be one release: every reference to itself
+      # names the tag that holds exactly these contents.
+      - name: Check that references to this repository form one release
+        run: python3 scripts/check_release_refs.py
