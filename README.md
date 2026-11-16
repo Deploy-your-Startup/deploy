@@ -300,7 +300,7 @@ commit. Merging here changes no project; `startup update` moves a project to
 the latest release as a reviewable change, and `startup ansible setup_ansible`
 refreshes the local checkout. Do not hand-edit `deployment/.shared-roles`.
 Projects that used a per-owner `deploy-your-startup` copy switch once with
-`startup migrate shared-source`.
+`startup migrate deploy`.
 
 In the examples below, replace `<commit-sha>` with the commit of a release of
 this repository. Avoid `@main`: a moving reference changes production CI

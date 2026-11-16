@@ -79,8 +79,8 @@ Projects that call a per-owner `<github-owner>/deploy-your-startup` copy switch
 once:
 
 ```sh
-startup migrate shared-source --dry-run
-startup migrate shared-source
+startup migrate deploy --dry-run
+startup migrate deploy
 ```
 
 It points the workflow references and `shared-roles.ref` at the current release
