@@ -163,7 +163,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: runtime
-        uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
+        uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@v1.0.0
       # Once per run: a broken make.sh format/lint contract stops every service.
       - name: "Check lint contract"
         if: ${{ steps.services.outputs.lint == 'true' }}
@@ -216,7 +216,7 @@ jobs:
       - name: "Setup environment"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@v1.0.0
         with:
           revision: ${{ needs.prepare.outputs.revision }}
 
@@ -346,7 +346,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: github.event_name == 'pull_request' && inputs.reuse_pr_build
-      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@v1.0.0
         if: github.event_name == 'pull_request' && inputs.reuse_pr_build
         with:
           revision: ${{ needs.prepare.outputs.revision }}
