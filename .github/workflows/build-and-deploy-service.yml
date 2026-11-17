@@ -115,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Never hold the deployment lock while waiting for its infrastructure owner.
-      - uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@v2.1.0
 
   publish:
     if: github.event_name != 'pull_request' && needs.verify.result == 'success'

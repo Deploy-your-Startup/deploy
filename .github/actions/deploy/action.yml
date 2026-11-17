@@ -141,7 +141,7 @@ runs:
     # No-op for public projects; see the join-tailnet action.
     - name: "Join tailnet (private network mode)"
       if: ${{ inputs._pin-resolved == 'true' || hashFiles('deployment/shared-roles.ref') == '' }}
-      uses: Deploy-your-Startup/deploy/.github/actions/join-tailnet@main
+      uses: Deploy-your-Startup/deploy/.github/actions/join-tailnet@v2.1.0
       with:
         environment: ${{ inputs.environment }}
         vault_password: ${{ inputs.vault_password }}
