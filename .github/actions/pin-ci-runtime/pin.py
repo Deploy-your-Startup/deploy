@@ -23,12 +23,14 @@ def main():
             if len(matches) != 1:
                 raise ValueError('Ambiguous reusable workflow revision')
             revision = matches.pop()
-        except (subprocess.SubprocessError, ValueError, KeyError):
-            # Preserve the pre-existing full pipeline when Actions metadata is unavailable.
-            revision = 'unavailable'
-    if revision != 'unavailable' and not re.fullmatch(r'[0-9a-f]{40}', revision):
+        except (subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+            raise SystemExit(
+                'Cannot resolve the reviewed shared workflow revision; refusing to load actions from main. '
+                'Check Actions metadata permissions and rerun the workflow.'
+            ) from exc
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise SystemExit('Invalid shared workflow revision')
-    reference = 'main' if revision == 'unavailable' else revision
+    reference = revision
     definitions = {
         'docker-test': {
             'cache_scope': 'test', 'context': '', 'dockerfile': '', 'image': '', 'tag': '',
