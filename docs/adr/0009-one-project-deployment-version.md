@@ -19,7 +19,9 @@ route the requested operation to the existing implementations at the same
 release commit. Valid operations allocate no additional runner.
 
 The CLI reads the same reference for roles, updates, forks and template
-preservation. `startup update` migrates supported direct callers and removes
+preservation. It checks the separately locked project CLI before removing
+legacy pins. Application templates declare `deployment_version: single` and
+refuse an application update until shared deployment has been migrated. `startup update` migrates supported direct callers and removes
 the two legacy pin files. Unsupported custom calls fail before writing edits.
 The release workflow's public input schema generates the local entry point.
 

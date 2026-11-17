@@ -50,7 +50,10 @@ startup ansible pin --working-directory deployment --version <release-tag>
 The only active reference is in `.github/workflows/startup.yml`. The CLI
 migrates supported direct workflow calls to that local entry and removes
 `shared-roles.ref` and `shared-roles.sha256`. Local operations read the same
-reference. Review the entry and caller changes together with the project's CLI
+reference. Upgrade the project-locked CLI dependency and lockfile before
+migrating; a newer global installation alone does not replace that runtime.
+Run `startup update` before adopting an application template that declares
+`deployment_version: single`. Review the entry and caller changes together with the project's CLI
 dependency and lockfile. The configured version describes the next operation;
 a successful Actions deployment run is the execution record.
 
