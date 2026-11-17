@@ -47,7 +47,12 @@ reconstructs its tree with Git, verifies the workflow/runtime identity, and chec
 all referenced images. It does not trust an image tag or a JSON assertion alone.
 Evidence expires after one day. Fork PRs, unknown runtime revisions, additional
 build contexts, missing metadata and incomplete reruns are not reusable. They
-keep the full pipeline. A lookup API failure also falls back to full checks.
+keep the full pipeline. An evidence lookup API failure also falls back to full checks.
+
+Resolving the shared workflow revision is required even for fresh checks. If
+Actions metadata is missing, ambiguous or unavailable, the runtime loader stops
+before loading any shared action. It never falls back to `main`; correct the
+metadata access and rerun the workflow.
 
 The publish job revalidates the selected evidence and checks the downloaded ZIP
 against GitHub's immutable artifact digest before passing the OCI archive to

@@ -257,7 +257,7 @@ def test_all_service_images_are_required_together(github):
 
 
 @pytest.mark.parametrize('resolved', [True, False])
-def test_runtime_loader_pins_actions_or_disables_reuse(github, tmp_path, resolved):
+def test_runtime_loader_pins_actions_or_stops_without_loading_main(github, tmp_path, resolved):
     # GIVEN GitHub's current referenced-workflow metadata (or an unavailable API).
     bindir = tmp_path / 'bin'
     bindir.mkdir()
@@ -272,16 +272,37 @@ def test_runtime_loader_pins_actions_or_disables_reuse(github, tmp_path, resolve
         env={**github['env'], 'PATH': str(bindir) + os.pathsep + os.environ['PATH'],
              'SHARED_REPOSITORY': 'owner/shared', 'SHARED_REVISION': '', 'GITHUB_OUTPUT': str(output)},
         text=True, capture_output=True)
-    # THEN all shared check actions use the verified revision; lookup failure is explicit.
+    # THEN a lookup failure stops before writing any actions or authorizing later jobs.
+    if not resolved:
+        assert result.returncode != 0
+        assert 'refusing to load actions from main' in result.stderr
+        assert not output.exists()
+        assert not (github['workspace'] / '.git/startup-actions').exists()
+        return
+    # AND successful resolution pins every action to the reviewed revision.
     assert result.returncode == 0, result.stderr
-    revision = REVISION if resolved else 'unavailable'
+    revision = REVISION
     assert output.read_text() == 'revision=' + revision + '\n'
     for name in ('docker-test', 'coverage-report', 'container-e2e', 'verified-build'):
         action = json.loads((github['workspace'] / '.git/startup-actions' / name / 'action.yml').read_text())
-        expected = REVISION if resolved else 'main'
+        expected = REVISION
         assert action['runs']['steps'][0]['uses'] == f'owner/shared/.github/actions/{name}@{expected}'
     verified = json.loads((github['workspace'] / '.git/startup-actions/verified-build/action.yml').read_text())
     assert verified['inputs']['revision']['default'] == revision
+
+
+@pytest.mark.parametrize('revision', ['main', 'unavailable', '1234'])
+def test_runtime_loader_rejects_nonimmutable_supplied_revisions(github, tmp_path, revision):
+    # GIVEN an invalid revision passed by a previous job, WHEN loading actions,
+    # THEN execution stops before creating a wrapper or recording any output.
+    output = tmp_path / 'pin-output'
+    result = subprocess.run([sys.executable, str(ROOT / '.github/actions/pin-ci-runtime/pin.py')],
+        env={**github['env'], 'SHARED_REPOSITORY': 'owner/shared',
+             'SHARED_REVISION': revision, 'GITHUB_OUTPUT': str(output)},
+        text=True, capture_output=True)
+    assert result.returncode != 0
+    assert not output.exists()
+    assert not (github['workspace'] / '.git/startup-actions').exists()
 
 
 def test_nested_loader_records_evidence_without_an_action_repository_context(github, tmp_path):
