@@ -31,7 +31,7 @@ jobs:
         shard: ${{ fromJSON(inputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
+      - uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@v1.1.0
         if: inputs.runtime_revision != ''
         with:
           revision: ${{ inputs.runtime_revision }}
@@ -54,7 +54,7 @@ jobs:
           total: ${{ inputs.shards }}
       - name: Run isolated browser shard
         if: inputs.runtime_revision == ''
-        uses: Deploy-your-Startup/deploy/.github/actions/container-e2e@main
+        uses: Deploy-your-Startup/deploy/.github/actions/container-e2e@v1.1.0
         with:
           directory: ${{ inputs.directory }}
           image: startup-e2e:${{ github.run_id }}
