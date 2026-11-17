@@ -3,6 +3,10 @@ name: Build and Deploy Service
 on:
   workflow_call:
     inputs:
+      health_url:
+        description: "Optional public HTTPS health endpoint checked after deployment"
+        type: string
+        default: ''
       environment:
         description: "Environment to deploy"
         required: false
@@ -81,6 +85,7 @@ jobs:
       actions: read
       pull-requests: write
     with:
+      health_url: ${{ inputs.health_url }}
       environment: ${{ inputs.environment }}
       service: ${{ inputs.service }}
       services: ${{ inputs.services }}
@@ -95,12 +100,24 @@ jobs:
       platforms: ${{ inputs.platforms }}
       additional_build_context: ${{ inputs.additional_build_context }}
 
+  infrastructure-ready:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Never hold the deployment lock while waiting for its infrastructure owner.
+      - uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+
   publish:
     if: github.event_name != 'pull_request' && needs.verify.result == 'success'
-    needs: verify
+    needs: [verify, infrastructure-ready]
     uses: ./.github/workflows/publish-service-images.yml
     concurrency:
-      group: startup-publish-${{ inputs.environment }}-${{ inputs.service }}
+      group: startup-deploy-${{ inputs.environment || 'production' }}
       cancel-in-progress: false
     permissions:
       contents: read

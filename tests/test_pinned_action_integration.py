@@ -69,7 +69,7 @@ def test_runtime_check_selects_a_pin_that_exists_in_its_own_history(tmp_path, hi
     git('add', '.')
     git('commit', '-m', 'current')
     expected = previous if history == 'existing-runtime' else git('rev-parse', 'HEAD')
-    workflow = yaml.load((ROOT / '.github/workflows/check-pinned-runtime.yml').read_text(), Loader=yaml.BaseLoader)
+    workflow = yaml.load((ROOT / '.github/workflows/ci-pinned-runtime.yml').read_text(), Loader=yaml.BaseLoader)
     # WHEN the actual runtime check selects its fixture pin.
     script = workflow['jobs']['pinned-runtime']['steps'][1]['run']
     subprocess.run(['bash', '-e', '-c', script], cwd=tmp_path, check=True)

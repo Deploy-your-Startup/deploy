@@ -145,7 +145,7 @@ def test_shared_workflow_separates_cancellation_from_the_application_publication
     assert deployment['uses'] == './.github/workflows/publish-service-images.yml'
     assert deployment['concurrency']['cancel-in-progress'] == 'false'
     assert 'github.ref' not in deployment['concurrency']['group']
-    assert deployment['needs'] == 'verify'
+    assert set(deployment['needs']) == {'verify', 'infrastructure-ready'}
     assert "needs.verify.result == 'success'" in deployment['if']
     assert "github.event_name != 'pull_request'" in deployment['if']
     # THEN the gate still protects every service, and freshness runs once inside
@@ -158,25 +158,55 @@ def test_shared_workflow_separates_cancellation_from_the_application_publication
     assert entry['on']['workflow_call']['inputs'] == verify['on']['workflow_call']['inputs']
 
 
-def test_deprecated_parallel_alias_forwards_everything_to_the_entry_point():
-    # GIVEN the deprecated alias kept for callers pinned to its old name.
+def test_all_mutating_paths_share_one_environment_lock_without_waiting_inside_it():
+    # GIVEN all shipped entrypoints that can change the same deployment,
     def workflow(name):
         return yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader)
 
-    alias = workflow('build-and-deploy-service-parallel.yml')
-    entry = workflow('build-and-deploy-service.yml')
-    # WHEN following its only job into the reusable entry point.
-    job = alias['jobs']['build-and-deploy']
-    assert list(alias['jobs']) == ['build-and-deploy']
-    assert job['uses'] == './.github/workflows/build-and-deploy-service.yml'
-    # THEN it accepts and forwards the same inputs and secret unchanged, with
-    # every permission the entry point's jobs request.
-    inputs = entry['on']['workflow_call']['inputs']
-    assert alias['on']['workflow_call']['inputs'] == inputs
-    assert job['with'] == {name: '${{ inputs.%s }}' % name for name in inputs}
-    assert job['secrets'] == {'VAULT_PASSWORD': '${{ secrets.VAULT_PASSWORD }}'}
-    requested = {}
-    for child in entry['jobs'].values():
-        for scope, level in child['permissions'].items():
-            requested[scope] = 'write' if 'write' in (level, requested.get(scope)) else level
-    assert job['permissions'] == requested
+    build = workflow('build-and-deploy-service.yml')['jobs']
+    direct = workflow('deploy.yml')['jobs']
+    infrastructure = workflow('deploy-infrastructure.yml')['jobs']
+    # WHEN the actual native scheduler definitions are compared,
+    for job in [build['publish'], direct['deploy'], infrastructure['deploy-infrastructure']]:
+        lock = job['concurrency']
+        assert lock['cancel-in-progress'] == 'false'
+        group = lock['group'].replace(" || 'production'", '')
+        assert group == 'startup-deploy-${{ inputs.environment }}'
+    for jobs in [build, direct]:
+        assert 'concurrency' not in jobs['infrastructure-ready']
+        assert 'infrastructure-ready' in jobs['publish' if jobs is build else 'deploy']['needs']
+    # THEN any gate still inside the shared lock is nonblocking, avoiding a
+    # dependency cycle when infrastructure is queued for that same lock.
+    publish = workflow('publish-service-images.yml')['jobs']
+    for steps in [direct['deploy']['steps'], publish['publish']['steps']]:
+        wait = next(s for s in steps if '/wait-for-infrastructure@' in s.get('uses', ''))
+        assert wait['with']['timeout_minutes'] == '0'
+    assert set(publish['health']['needs']) == {'current', 'publish'}
+    assert '/deployment-health@' in publish['health']['steps'][0]['uses']
+
+
+def test_direct_deploy_checks_freshness_before_mutation_and_health_afterwards():
+    # GIVEN the direct deployment path, which does not build application images,
+    workflow = yaml.load((ROOT / '.github/workflows/deploy.yml').read_text(), Loader=yaml.BaseLoader)
+    steps = workflow['jobs']['deploy']['steps']
+    # WHEN following its executable action order,
+    current = next(i for i, s in enumerate(steps) if s.get('id') == 'current')
+    deploy = next(i for i, s in enumerate(steps) if '/actions/deploy@' in s.get('uses', ''))
+    health = next(i for i, s in enumerate(steps) if '/deployment-health@' in s.get('uses', ''))
+    # THEN a superseded run cannot mutate, and success requires configured health.
+    assert current < deploy < health
+    assert steps[deploy]['if'] == steps[health]['if'] == "steps.current.outputs.current == 'true'"
+
+
+def test_repository_ci_keeps_documentation_tests_and_has_no_legacy_alias():
+    # GIVEN the workflow inventory after consolidation,
+    workflows = ROOT / '.github/workflows'
+    # WHEN repository CI invokes the full real test runner,
+    roles = yaml.load((workflows / 'ci-roles.yml').read_text(), Loader=yaml.BaseLoader)
+    commands = [s.get('run', '') for s in roles['jobs']['check']['steps']]
+    # THEN both documentation suites are still collected by pytest, while the
+    # redundant workflow and obsolete public API are absent.
+    assert './make.sh test' in commands
+    assert 'testpaths = ["tests"]' in (ROOT / 'pyproject.toml').read_text()
+    assert not (workflows / 'testing-policy.yml').exists()
+    assert not (workflows / 'build-and-deploy-service-parallel.yml').exists()

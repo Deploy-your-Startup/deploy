@@ -3,6 +3,10 @@ name: Deploy
 on:
   workflow_call:
     inputs:
+      health_url:
+        description: "Optional public HTTPS health endpoint checked after deployment"
+        type: string
+        default: ''
       environment:
         description: "Environment which should be deployed"
         required: true
@@ -12,12 +16,22 @@ on:
       VAULT_PASSWORD:
         required: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.environment || github.event.inputs.environment }}-deploy
-  cancel-in-progress: true
-
 jobs:
+  infrastructure-ready:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+
   deploy:
+    needs: infrastructure-ready
+    concurrency:
+      group: startup-deploy-${{ inputs.environment || 'production' }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,13 +41,25 @@ jobs:
       - name: "Checkout repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: "Wait for infrastructure"
-        if: github.event_name != 'pull_request'
-        uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+      - name: Check deployment freshness
+        id: current
+        uses: Deploy-your-Startup/deploy/.github/actions/current-deployment@main
 
-      - name: "Deploy!!"
-        if: github.event_name != 'pull_request'
+      - name: Require infrastructure still ready
+        if: steps.current.outputs.current == 'true'
+        uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+        with:
+          timeout_minutes: '0'
+
+      - name: Deploy application
+        if: steps.current.outputs.current == 'true'
         uses: Deploy-your-Startup/deploy/.github/actions/deploy@main
         with:
           environment: ${{ inputs.environment || github.event.inputs.environment || 'production' }}
           vault_password: ${{ secrets.VAULT_PASSWORD }}
+
+      - name: Verify deployment health
+        if: steps.current.outputs.current == 'true'
+        uses: Deploy-your-Startup/deploy/.github/actions/deployment-health@main
+        with:
+          url: ${{ inputs.health_url }}
