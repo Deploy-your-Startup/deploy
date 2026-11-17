@@ -457,6 +457,10 @@ your-project/
 
 ## Shared infrastructure roles
 
+The [weekly dependency audit](docs/role-dependencies.md) compares role defaults
+and Ansible collections with stable upstream releases and maintains one review
+issue. It never changes pins or deploys infrastructure.
+
 Projects load shared roles from their pinned `.shared-roles` checkout:
 
 | Role | Purpose and configuration |
