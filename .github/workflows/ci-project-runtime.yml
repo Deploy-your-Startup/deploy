@@ -1,0 +1,28 @@
+name: Check single-version project entry
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  packages: write
+  id-token: write
+  deployments: write
+jobs:
+  pages:
+    if: github.actor != 'dependabot[bot]'
+    uses: ./.github/workflows/project-pages.yml
+    with:
+      operation: e2e
+      run_e2e: false
+  server:
+    # The infrastructure implementation skips its execution step on PRs.
+    # This validates native nested workflow inputs and secret forwarding only.
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/project.yml
+    with:
+      operation: infrastructure
+    secrets:
+      VAULT_PASSWORD: non-production-contract-fixture

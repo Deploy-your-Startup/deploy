@@ -84,6 +84,8 @@ def test_compose_harness_preserves_reports_exit_status_and_cleans_stack(tmp_path
     (tmp_path / "compose.yml").write_text("""services:
   test:
     image: ${E2E_IMAGE}
+    # This standalone fixture needs no service discovery or private network.
+    network_mode: bridge
     environment:
       SHARD_INDEX: ${SHARD_INDEX}
       SHARD_TOTAL: ${SHARD_TOTAL}

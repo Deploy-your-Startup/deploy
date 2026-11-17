@@ -47,31 +47,24 @@ startup update
 startup ansible pin --working-directory deployment --version <release-tag>
 ```
 
-Commit `shared-roles.ref` and `shared-roles.sha256` with the CLI dependency and
-lock file. Subsequent runs use that immutable commit. CI exports must match the
-checksum of role files and runtime configuration, even without Git metadata; a
-mismatch fails before any role executes. Merging to `main` here does not change
-a pinned project.
+The only active reference is in `.github/workflows/startup.yml`. The CLI
+migrates supported direct workflow calls to that local entry and removes
+`shared-roles.ref` and `shared-roles.sha256`. Local operations read the same
+reference. Upgrade the project-locked CLI dependency and lockfile before
+migrating; a newer global installation alone does not replace that runtime.
+Run `startup update` before adopting an application template that declares
+`deployment_version: single`. Review the entry and caller changes together with the project's CLI
+dependency and lockfile. The configured version describes the next operation;
+a successful Actions deployment run is the execution record.
 
-When `deployment/shared-roles.ref` exists, the `deploy` and
-`export-shared-roles` actions dispatch to the action code at that exact commit.
-Projects without a pin use the action's current revision. A runtime-equivalent
-commit can change action code while leaving the role checksum unchanged, so
-review the action diff too.
+The shared `project.yml` and `project-pages.yml` workflows route operations to
+the existing build, deploy, infrastructure and Pages workflows at the same
+release commit. Local checkouts must be clean; CI exports are compared to an
+independently fetched tree at that commit before Ansible executes.
 
-## Pinning workflow references
-
-Point application workflows at the release commit, not `@main`:
-
-```yaml
-uses: Deploy-your-Startup/deploy/.github/workflows/build-and-deploy-service.yml@<release-commit>
-```
-
-`startup update` writes the release commit into the project's shared workflow
-references together with the role pin; `startup ansible pin --version
-<release-tag>` is the underlying step. Independently, `pin-ci-runtime` loads the
-shared build actions from the caller's workflow commit, and `deploy` and
-`export-shared-roles` follow `shared-roles.ref`.
+Projects on older releases keep their legacy direct references and role pins.
+An explicit rollback to a release without the project router restores that
+legacy interface. Published releases and tags are never modified.
 
 ## Moving from an owner copy
 

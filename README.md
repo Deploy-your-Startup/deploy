@@ -311,8 +311,8 @@ esac
 ## Usage in Your Projects
 
 Projects call this public repository directly and pin one release: the
-workflow references and `deployment/shared-roles.ref` name the same release
-commit. Merging here changes no project; `startup update` moves a project to
+single external reference in `.github/workflows/startup.yml` configures
+local operations and CI. Other project workflows call that local entry. Merging here changes no project; `startup update` moves a project to
 the latest release as a reviewable change, and `startup ansible setup_ansible`
 refreshes the local checkout. Do not hand-edit `deployment/.shared-roles`.
 Projects that used a per-owner `deploy-your-startup` copy switch once with
@@ -636,9 +636,11 @@ integration success alone is not live release compatibility.
 
 ## Immutable runtime in Actions
 
-When `deployment/shared-roles.ref` exists, deployment and role export run the
-shared action at that exact owner-repository commit, and the CLI checks
-`shared-roles.sha256` before Ansible runs. See
+The project entry selects a self-contained release whose workflows, actions
+and roles use the same revision. Local CLI operations read that entry and
+verify clean Git checkouts or compare exports against that commit, without
+separate committed pin or checksum files. Legacy callers retain the previous
+`shared-roles.ref` / `shared-roles.sha256` contract for rollback. See
 [releasing and pinning](docs/releasing.md).
 
 ## Coverage harness contract
