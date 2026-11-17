@@ -6,6 +6,10 @@
     should_reboot: "{{ update_reboot | default(false) | bool }}"
 
   tasks:
+    - name: Protect containerd before package updates or a new kernel
+      ansible.builtin.import_role:
+        name: containerd-apparmor
+
     - name: Refresh apt package index
       apt:
         update_cache: true

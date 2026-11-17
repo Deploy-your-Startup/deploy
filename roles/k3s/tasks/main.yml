@@ -1,4 +1,8 @@
 ---
+- name: Protect the containerd AppArmor policy before k3s starts or upgrades
+  ansible.builtin.import_role:
+    name: containerd-apparmor
+
 - name: "Gather network, role and version facts"
   ansible.builtin.import_tasks: facts.yml
 

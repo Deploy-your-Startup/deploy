@@ -1,0 +1,153 @@
+---
+- name: Check the active AppArmor policy interface
+  ansible.builtin.slurp:
+    src: "{{ containerd_apparmor_root }}/sys/kernel/security/apparmor/profiles"
+  register: containerd_apparmor_loaded
+
+- name: Read confinement of running containerd processes
+  ansible.builtin.shell: |
+    for process in {{ (containerd_apparmor_root ~ '/proc') | quote }}/[0-9]*; do
+      [ -r "$process/comm" ] || continue
+      if [ "$(cat "$process/comm")" = containerd ]; then
+        cat "$process/attr/current" || exit 1
+      fi
+    done
+  register: containerd_apparmor_daemons
+  check_mode: false
+  changed_when: false
+
+- name: Check for a rootless runtime helper
+  ansible.builtin.shell: command -v rootlesskit
+  register: containerd_apparmor_rootless
+  check_mode: false
+  changed_when: false
+  failed_when: containerd_apparmor_rootless.rc not in [0, 1, 127]
+
+- name: Require the reviewed rootful runtime configuration
+  ansible.builtin.assert:
+    that:
+      - containerd_apparmor_daemons.stdout_lines | difference(['unconfined']) | length == 0
+      - containerd_apparmor_rootless.rc in [1, 127]
+    fail_msg: >-
+      The temporary containerd AppArmor backport supports only the default rootful
+      k3s runtime with an unconfined daemon and no RootlessKit. Review this node's
+      policy before installing or updating it; no profile has been changed.
+
+# The bundled profile is byte-identical across these reviewed upstream releases.
+# Refuse a new runtime rather than replace its possibly stronger default policy.
+- name: Check whether k3s is already installed
+  ansible.builtin.shell: command -v k3s
+  register: containerd_apparmor_k3s
+  check_mode: false
+  changed_when: false
+  failed_when: containerd_apparmor_k3s.rc not in [0, 1, 127]
+
+- name: Read the bundled containerd client version without connecting to the API
+  ansible.builtin.command:
+    argv: [k3s, ctr, --version]
+  register: containerd_apparmor_runtime
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  when: containerd_apparmor_k3s.rc == 0
+
+- name: Require a reviewed containerd profile version
+  ansible.builtin.assert:
+    that:
+      - >-
+        (containerd_apparmor_k3s.rc == 0 and containerd_apparmor_runtime.rc == 0 and
+         containerd_apparmor_runtime.stdout is search('(?:^| )v2\.3\.(4|6|7)(?:[-+ ].*|$)')) or
+        (containerd_apparmor_k3s.rc in [1, 127] and
+         containerd_apparmor_daemons.stdout | trim == '' and
+         k3s_version | default('') in ['v1.36.5+k3s1', 'v1.36.6+k3s1', 'v1.37.2+k3s1'])
+      - >-
+        not (k3s_upgrade | default(false) | bool) or
+        k3s_version | default('') in ['v1.36.5+k3s1', 'v1.36.6+k3s1', 'v1.37.2+k3s1']
+    fail_msg: >-
+      This backport carries only the reviewed containerd 2.3.4/2.3.6/2.3.7 default
+      policy. Review the runtime profile before changing this node. A fresh
+      installation must select one of the reviewed k3s releases.
+
+- name: Check that AppArmor will reload persistent profiles on boot
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, apparmor.service]
+  register: containerd_apparmor_boot
+  check_mode: false
+  changed_when: false
+  failed_when: false
+
+- name: Require persistent AppArmor loading
+  ansible.builtin.assert:
+    that:
+      - containerd_apparmor_boot.rc == 0
+      - containerd_apparmor_boot.stdout | trim == 'enabled'
+    fail_msg: Enable apparmor.service before maintenance so the corrected profile survives a reboot.
+
+- name: Check standard AppArmor policy includes
+  ansible.builtin.stat:
+    path: "{{ containerd_apparmor_root }}/etc/apparmor.d/{{ item }}"
+  loop: [abi/3.0, tunables/global, abstractions/base]
+  register: containerd_apparmor_includes
+
+- name: Require all standard policy includes
+  ansible.builtin.assert:
+    that: item.stat.exists
+    quiet: true
+    fail_msg: Install the distribution AppArmor policy includes before changing this node.
+  loop: "{{ containerd_apparmor_includes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect any persistent containerd profile
+  ansible.builtin.stat:
+    path: "{{ containerd_apparmor_root }}/etc/apparmor.d/cri-containerd.apparmor.d"
+    checksum_algorithm: sha256
+  register: containerd_apparmor_existing
+
+- name: Preserve administrator-owned profiles
+  ansible.builtin.assert:
+    that:
+      - >-
+        not containerd_apparmor_existing.stat.exists or
+        containerd_apparmor_existing.stat.checksum ==
+        (lookup('ansible.builtin.file', role_path ~ '/files/cri-containerd.apparmor.d', rstrip=false) | hash('sha256'))
+    fail_msg: >-
+      A custom /etc/apparmor.d/cri-containerd.apparmor.d already exists.
+      Merge containerd PR 14487 into that policy manually; it has been preserved.
+
+- name: Install the exact stacked-peer policy backport
+  ansible.builtin.copy:
+    src: cri-containerd.apparmor.d
+    dest: "{{ containerd_apparmor_root }}/etc/apparmor.d/cri-containerd.apparmor.d"
+    owner: root
+    group: root
+    mode: '0644'
+    validate: "{{ containerd_apparmor_parser }} -Q -K %s"
+  register: containerd_apparmor_policy
+
+# Always reload: a previous run may have copied the file and then failed to load
+# it, or containerd may have recreated the old in-kernel profile in the meantime.
+- name: Load the enforcing containerd profile without restarting workloads
+  ansible.builtin.command:
+    argv:
+      - "{{ containerd_apparmor_parser }}"
+      - -r
+      - -K
+      - "{{ containerd_apparmor_root }}/etc/apparmor.d/cri-containerd.apparmor.d"
+  when: not ansible_check_mode
+  changed_when: >-
+    containerd_apparmor_policy.changed or
+    'cri-containerd.apparmor.d (enforce)' not in (containerd_apparmor_loaded.content | b64decode).splitlines()
+
+- name: Read the loaded profile after the backport
+  ansible.builtin.slurp:
+    src: "{{ containerd_apparmor_root }}/sys/kernel/security/apparmor/profiles"
+  register: containerd_apparmor_verified
+  when: not ansible_check_mode
+
+- name: Require the containerd profile to be enforced
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - "'cri-containerd.apparmor.d (enforce)' in (containerd_apparmor_verified.content | b64decode).splitlines()"
+    fail_msg: The corrected containerd AppArmor profile is not enforcing; stop before further maintenance.

@@ -1,0 +1,10 @@
+The file cri-containerd.apparmor.d derives from containerd v2.3.4,
+contrib/apparmor/template.go.
+Copyright The docker Authors.
+Copyright The Moby Authors.
+Copyright The containerd Authors.
+https://github.com/containerd/containerd/blob/v2.3.4/contrib/apparmor/template.go
+Licensed under Apache License 2.0; see LICENSE.containerd.
+
+Changes: render the default rootful CRI profile and backport the exact
+stacked-peer signal/ptrace rules from containerd PR 14487 (2.3 backport 14590).
