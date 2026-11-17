@@ -1,6 +1,6 @@
 # Reusing a verified PR build
 
-The parallel service workflow can reuse production images from a successful
+The service workflow can reuse production images from a successful
 pull-request run after a push. It compares the tracked Git tree, complete caller
 inputs, resolved service matrix, calling workflow identity and immutable shared
 CI runtime revision. Squash, merge and equivalent direct-push commits can reuse

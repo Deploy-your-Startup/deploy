@@ -1,4 +1,4 @@
-name: Check immutable runtime dispatch
+name: "CI: Pinned runtime"
 on:
   pull_request:
   push:

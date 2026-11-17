@@ -47,8 +47,13 @@ not call E2E. Project callers may invoke them manually, and some invoke
 `deploy.yml` on changes under `deployment/**`. Direct deployment through the
 startup CLI is also a separate path. These operations do not establish a fresh
 E2E pass; the build gate must not be described as protecting every
-possible deployment path. Configuration or role changes can affect user flows
-and need appropriate checks and deployment verification.
+possible deployment path. Configuration or role changes can affect user flows.
+All Ansible deployment paths validate playbook syntax before server access.
+Set `health_url` on the build, direct-deploy or infrastructure caller to require
+a public HTTPS endpoint to return HTTP 2xx afterwards. Without it, the job
+summary explicitly records health as skipped and unverified. A health endpoint
+checks only that endpoint; it does not replace application E2E. Private tailnet
+sites should keep this hosted-runner public check disabled unless reachable.
 
 See the [direct deploy workflow](../.github/workflows/deploy.yml) and
 [infrastructure workflow](../.github/workflows/deploy-infrastructure.yml).
