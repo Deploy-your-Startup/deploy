@@ -42,7 +42,7 @@ jobs:
 
       - name: "Deploy Infrastructure"
         if: github.event_name != 'pull_request'
-        uses: Deploy-your-Startup/deploy/.github/actions/deploy@main
+        uses: Deploy-your-Startup/deploy/.github/actions/deploy@v2.0.0
         with:
           environment: ${{ inputs.environment || github.event.inputs.environment }}
           service: "infrastructure"
@@ -50,6 +50,6 @@ jobs:
 
       - name: Verify deployment health
         if: github.event_name != 'pull_request'
-        uses: Deploy-your-Startup/deploy/.github/actions/deployment-health@main
+        uses: Deploy-your-Startup/deploy/.github/actions/deployment-health@v2.0.0
         with:
           url: ${{ inputs.health_url }}
