@@ -13,3 +13,5 @@ records from 0100. Supersede a record with a new one instead of rewriting it.
 | [0005](0005-local-or-ci-e2e.md) | Select local or CI browser verification without changing the test suite |
 | [0006](0006-one-build-workflow.md) | One service build workflow; the parallel name is a deprecated alias |
 | [0007](0007-releases-are-self-contained.md) | Each release is immutable and its references name its own tag |
+
+| [0008](0008-one-project-deployment-version.md) | One native project reference configures local and CI deployment |
