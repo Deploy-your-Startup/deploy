@@ -16,6 +16,10 @@ on:
         description: 'Optional JSON array of service objects; one E2E gate protects all services'
         type: string
         default: ''
+      preflight_script:
+        description: "Optional repository-relative Bash check, run during preparation before build reuse"
+        type: string
+        default: ''
       reuse_pr_build:
         description: "Reuse a verified equivalent PR build on push; false forces fresh checks"
         type: boolean
@@ -162,6 +166,11 @@ jobs:
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check project preflight
+        if: inputs.preflight_script != ''
+        env:
+          PREFLIGHT_SCRIPT: ${{ inputs.preflight_script }}
+        run: bash -- "$PREFLIGHT_SCRIPT"
       - id: runtime
         uses: Deploy-your-Startup/deploy/.github/actions/pin-ci-runtime@main
       # Once per run: a broken make.sh format/lint contract stops every service.
