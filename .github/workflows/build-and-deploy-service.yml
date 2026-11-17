@@ -20,6 +20,10 @@ on:
         description: 'Optional JSON array of service objects; one E2E gate protects all services'
         type: string
         default: ''
+      preflight_script:
+        description: "Optional repository-relative Bash check, run during preparation before build reuse"
+        type: string
+        default: ''
       reuse_pr_build:
         description: "Reuse a verified equivalent PR build on push; false forces fresh checks"
         type: boolean
@@ -89,6 +93,7 @@ jobs:
       environment: ${{ inputs.environment }}
       service: ${{ inputs.service }}
       services: ${{ inputs.services }}
+      preflight_script: ${{ inputs.preflight_script }}
       reuse_pr_build: ${{ inputs.reuse_pr_build }}
       run_tests: ${{ inputs.run_tests }}
       run_lint: ${{ inputs.run_lint }}
