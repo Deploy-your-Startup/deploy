@@ -3,9 +3,13 @@ name: Deploy Infrastructure
 on:
   workflow_call:
     inputs:
+      health_url:
+        description: "Optional public HTTPS health endpoint checked after deployment"
+        type: string
+        default: ''
       environment:
         description: 'Environment which infrastructure should be deployed'
-        required: true
+        required: false
         default: 'production'
         type: string
     secrets:
@@ -13,6 +17,10 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      health_url:
+        description: "Optional public HTTPS health endpoint"
+        type: string
+        default: ''
       environment:
         description: 'Environment which infrastructure should be deployed'
         required: true
@@ -21,12 +29,12 @@ on:
         options:
           - production
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.environment || github.event.inputs.environment }}-deploy-infrastructure
-  cancel-in-progress: true
-
 jobs:
   deploy-infrastructure:
+    if: github.event_name != 'pull_request'
+    concurrency:
+      group: startup-deploy-${{ inputs.environment || 'production' }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repository"
@@ -39,3 +47,9 @@ jobs:
           environment: ${{ inputs.environment || github.event.inputs.environment }}
           service: "infrastructure"
           vault_password: ${{ secrets.VAULT_PASSWORD }}
+
+      - name: Verify deployment health
+        if: github.event_name != 'pull_request'
+        uses: Deploy-your-Startup/deploy/.github/actions/deployment-health@main
+        with:
+          url: ${{ inputs.health_url }}

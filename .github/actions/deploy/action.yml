@@ -130,6 +130,14 @@ runs:
       run: |
         ./make.sh setup_ansible --no-refresh
     
+    - name: Validate deployment playbook before connecting to servers
+      if: ${{ inputs._pin-resolved == 'true' || hashFiles('deployment/shared-roles.ref') == '' }}
+      shell: bash
+      working-directory: ./deployment
+      run: |
+        startup ansible validate --working-directory . --playbook playbook.yml \
+          --inventory "${{ github.action_path }}/syntax-inventory.ini"
+
     # No-op for public projects; see the join-tailnet action.
     - name: "Join tailnet (private network mode)"
       if: ${{ inputs._pin-resolved == 'true' || hashFiles('deployment/shared-roles.ref') == '' }}

@@ -70,6 +70,10 @@ name: Shared project runtime
         description: build, deploy or infrastructure
         type: string
         required: true
+      health_url:
+        description: Optional public HTTPS health endpoint checked after deployment
+        type: string
+        default: ''
     secrets:
       VAULT_PASSWORD:
         required: true
@@ -78,6 +82,7 @@ jobs:
     if: inputs.operation == 'build'
     uses: ./.github/workflows/build-and-deploy-service.yml
     with:
+      health_url: ${{ inputs.health_url }}
       environment: ${{ inputs.environment }}
       service: ${{ inputs.service }}
       services: ${{ inputs.services }}
@@ -98,6 +103,7 @@ jobs:
     if: inputs.operation == 'deploy'
     uses: ./.github/workflows/deploy.yml
     with:
+      health_url: ${{ inputs.health_url }}
       environment: ${{ inputs.environment }}
     secrets:
       VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}
@@ -105,6 +111,7 @@ jobs:
     if: inputs.operation == 'infrastructure'
     uses: ./.github/workflows/deploy-infrastructure.yml
     with:
+      health_url: ${{ inputs.health_url }}
       environment: ${{ inputs.environment }}
     secrets:
       VAULT_PASSWORD: ${{ secrets.VAULT_PASSWORD }}

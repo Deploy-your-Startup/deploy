@@ -67,6 +67,12 @@ jobs:
         if: inputs.reuse == 'true'
         with:
           revision: ${{ inputs.revision }}
+      # Recheck after acquiring the lock. A newly queued infrastructure run
+      # must stop publication, never wait here for the same lock.
+      - name: Require infrastructure still ready
+        uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
+        with:
+          timeout_minutes: '0'
       - name: Restore verified PR image
         if: inputs.reuse == 'true'
         uses: ./.git/startup-actions/verified-build
@@ -98,8 +104,6 @@ jobs:
             "oci-archive:$RUNNER_TEMP/production-image.tar" "docker://$IMAGE:$TAG"
           skopeo copy --all --authfile "$HOME/.docker/config.json" \
             "docker://$IMAGE:$TAG" "docker://$IMAGE:latest"
-      - name: Wait for infrastructure
-        uses: Deploy-your-Startup/deploy/.github/actions/wait-for-infrastructure@main
       - name: Deploy service
         uses: Deploy-your-Startup/deploy/.github/actions/deploy@main
         with:
@@ -107,3 +111,12 @@ jobs:
           service: ${{ matrix.service }}
           vault_password: ${{ secrets.VAULT_PASSWORD }}
 
+  health:
+    needs: [current, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: Deploy-your-Startup/deploy/.github/actions/deployment-health@main
+        with:
+          url: ${{ fromJSON(inputs.configuration).health_url }}

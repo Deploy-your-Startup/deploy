@@ -46,7 +46,7 @@ def test_project_check_runs_before_reuse_and_blocks_publication(tmp_path, script
 
 def test_existing_callers_opt_out_and_all_entrypoints_forward_the_check():
     # GIVEN existing callers without project preflight configuration.
-    for name in ("build-and-deploy-service.yml", "build-and-deploy-service-parallel.yml", "verify-service-images.yml"):
+    for name in ("build-and-deploy-service.yml", "verify-service-images.yml"):
         data = workflow(name)
         # THEN the extension defaults off and remains part of the complete reuse identity.
         assert data["on"]["workflow_call"]["inputs"]["preflight_script"]["default"] == ""

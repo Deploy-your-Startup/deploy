@@ -35,9 +35,10 @@ decisions are recorded in [docs/adr](docs/adr/README.md).
   - Standardized Docker image building and pushing
   - Deployment to configured environments
 
-`.github/workflows/build-and-deploy-service-parallel.yml` is a deprecated alias
-that forwards to this workflow. It keeps callers pinned to its name working;
-point new and updated references at `build-and-deploy-service.yml`.
+Version 2 removes `build-and-deploy-service-parallel.yml`. Before adopting v2,
+rename that path to `build-and-deploy-service.yml` in any existing caller.
+The old pinned releases remain available. Repository-only checks use the `ci-`
+filename prefix; they are not reusable application workflows.
 
 Service preparation also selects the E2E mode and validates the shard matrix;
 the browser runner needs no additional preparation job. Standalone container
@@ -61,17 +62,20 @@ Build caches are scoped per service and target.
 
 Verification and publication use separate concurrency groups. A new automatic
 run cancels superseded verification for the same workflow, ref, environment and
-application, without interrupting publication already in progress. Only
-publication waits for the application/environment lock; it covers the entire
-service matrix, including image publication and deployment. Manual verification
-runs independently and publication shares the same application lock across refs.
-After acquiring that lock, a push skips publication if a newer push to the same
-workflow and branch exists. This also prevents an older rerun from rolling back
-a newer push. A failed newer push requires a fix or an explicit manual redeploy;
-an older automatic run does not take its place. Freshness API failures block
-publication. Already-started publication finishes even if another push arrives.
+application. Running publication, direct deployment and infrastructure share a
+non-cancelling `startup-deploy-<environment>` lock across workflows and refs in
+the consumer repository. The lock covers all services and the final health check.
+Infrastructure waits happen before that lock; a nonblocking recheck inside it
+fails if newer infrastructure is queued, running or failed. This prevents waiting
+for a provisioning job that needs the very same lock.
 
-The public workflow and inputs remain the same. Required checks now appear under
+After acquiring the lock, build and direct-deploy pushes skip mutation if a newer
+push to their own workflow and branch exists. Manual redeployment may select a
+historical revision. Freshness API failures block deployment. Already-started
+deployment finishes when another push arrives. Separate repositories sharing a
+cluster still need operator coordination.
+
+The main service workflow path remains the same. Required checks appear under
 `verify / Required checks`; update any branch rules that require the old job
 name when adopting this revision. See [deployment scheduling](docs/deployment-scheduling.md)
 for adoption and verification limits.
@@ -133,6 +137,8 @@ See the [E2E execution guide](docs/e2e-execution.md) for triggers, skips and dir
 - **Features**:
   - Can be reused in other workflows
   - Deploys the services configured in the project playbook
+  - Validates playbook syntax with the pinned startup CLI before server access
+  - Optional `health_url`: require HTTP 2xx from a public HTTPS endpoint after deployment
 
 ### Infrastructure Deployment
 - **File**: `.github/workflows/deploy-infrastructure.yml`
@@ -140,7 +146,9 @@ See the [E2E execution guide](docs/e2e-execution.md) for triggers, skips and dir
 - **Triggers**: Manual workflow dispatch
 - **Features**:
   - Can be reused in other workflows
-  - Deploys infrastructure changes via Ansible
+  - Deploys infrastructure changes via Ansible under the shared environment lock
+  - Optional `health_url` for checking an existing application after maintenance;
+    leave empty for first provisioning before an application exists
 
 ### Cloudflare Pages
 - **File**: `.github/workflows/deploy-pages.yml`
@@ -456,6 +464,10 @@ your-project/
 ```
 
 ## Shared infrastructure roles
+
+The [weekly dependency audit](docs/role-dependencies.md) compares role defaults
+and Ansible collections with stable upstream releases and maintains one review
+issue. It never changes pins or deploys infrastructure.
 
 Projects load shared roles from their pinned `.shared-roles` checkout:
 

@@ -68,6 +68,32 @@ def test_every_role_has_valid_ansible_task_syntax():
     assert {role.get_name() for role in playbook.get_plays()[0].get_roles()} == {path.name for path in (ROOT / "roles").iterdir()}
 
 
+def test_deployment_syntax_inventory_is_static_and_parses_without_provider_access():
+    # GIVEN the actual inventory passed to the pinned CLI's syntax check,
+    from ansible.inventory.manager import InventoryManager
+    loader = DataLoader()
+    source = ROOT / '.github/actions/deploy/syntax-inventory.ini'
+    # WHEN Ansible parses it with its real inventory loader,
+    inventory = InventoryManager(loader=loader, sources=[str(source)])
+    # THEN expected project host patterns resolve entirely to local fixtures.
+    assert inventory.get_hosts('hcloud')[0].name == 'localhost'
+    assert inventory.get_hosts('hcloud_type_master')[0].name == 'localhost'
+    assert inventory.get_hosts('provision-infrastructure')[0].get_vars()['ansible_connection'] == 'local'
+
+
+def test_deployment_validates_syntax_before_tailnet_and_ssh():
+    # GIVEN the composite deployment action at the project's reviewed revision,
+    action = yaml.load((ROOT / '.github/actions/deploy/action.yml').read_text(), Loader=yaml.BaseLoader)
+    steps = action['runs']['steps']
+    # WHEN following the executable sequence of server access operations,
+    validate = next(i for i, s in enumerate(steps) if 'startup ansible validate' in s.get('run', ''))
+    tailnet = next(i for i, s in enumerate(steps) if '/join-tailnet@' in s.get('uses', ''))
+    ssh = next(i for i, s in enumerate(steps) if 'ssh-agent -a' in s.get('run', ''))
+    # THEN invalid syntax stops before either network or SSH credentials are used.
+    assert validate < tailnet < ssh
+    assert 'syntax-inventory.ini' in steps[validate]['run']
+
+
 def kpis_variables(**overrides):
     return {
         **{key: trust_as_template(value) if isinstance(value, str) else value

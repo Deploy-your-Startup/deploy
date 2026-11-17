@@ -39,8 +39,8 @@ on:
         required: true
 
 concurrency:
-  group: pages-deploy-${{ github.ref }}-${{ inputs.project_name }}
-  cancel-in-progress: true
+  group: pages-deploy-${{ inputs.project_name }}
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:

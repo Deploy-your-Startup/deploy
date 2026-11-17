@@ -3,6 +3,10 @@ name: Verify Service Images
 on:
   workflow_call:
     inputs:
+      health_url:
+        description: "Optional public HTTPS health endpoint checked after deployment"
+        type: string
+        default: ''
       environment:
         description: "Environment to deploy"
         required: false

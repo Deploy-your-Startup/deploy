@@ -57,9 +57,8 @@ files without refreshing shared roles or resolving a Vault password.
 
 | Workflow | Runs |
 | --- | --- |
-| `check-roles.yml` | `./make.sh lint` and `./make.sh test` with Docker checks required |
-| `check-pinned-runtime.yml` | the immutable runtime dispatch of the composite actions |
-| `testing-policy.yml` | Markdown link and testing-policy documentation checks |
+| `ci-roles.yml` | `./make.sh lint` and all tests, including Markdown links and testing policy, with Docker checks required |
+| `ci-pinned-runtime.yml` | the immutable runtime dispatch of the composite actions |
 
 The behaviour these checks protect is described in
 [operational safeguards](operational-safeguards.md). Release steps live in

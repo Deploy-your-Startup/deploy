@@ -1,0 +1,17 @@
+name: Deployment health
+description: Check an explicitly configured HTTPS endpoint after deployment
+inputs:
+  url:
+    description: Public HTTPS health endpoint; empty explicitly skips verification
+    default: ''
+  timeout_seconds:
+    description: Maximum time to wait for a successful response (1-600 seconds)
+    default: '120'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        STARTUP_HEALTH_URL: ${{ inputs.url }}
+        STARTUP_HEALTH_TIMEOUT: ${{ inputs.timeout_seconds }}
+      run: python3 "${{ github.action_path }}/check.py"

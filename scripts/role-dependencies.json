@@ -1,0 +1,110 @@
+[
+  {
+    "name": "k3s",
+    "path": "roles/k3s/defaults/main.yml",
+    "key": "k3s_version",
+    "kind": "k3s",
+    "url": "https://update.k3s.io/v1-release/channels",
+    "series": 2
+  },
+  {
+    "name": "cert-manager",
+    "path": "roles/cert-manager/defaults/main.yml",
+    "key": "cert_manager_chart_version",
+    "kind": "helm",
+    "url": "https://charts.jetstack.io/index.yaml",
+    "series": 1,
+    "chart": "cert-manager"
+  },
+  {
+    "name": "Gateway API",
+    "path": "roles/cert-manager/defaults/main.yml",
+    "key": "gateway_api_version",
+    "kind": "github",
+    "url": "https://api.github.com/repos/kubernetes-sigs/gateway-api/releases?per_page=100",
+    "series": 1
+  },
+  {
+    "name": "Hetzner ACME webhook",
+    "path": "roles/cert-manager/defaults/main.yml",
+    "key": "cert_manager_webhook_chart_version",
+    "kind": "helm",
+    "url": "https://charts.hetzner.cloud/index.yaml",
+    "series": 1,
+    "chart": "cert-manager-webhook-hetzner"
+  },
+  {
+    "name": "Hetzner cloud controller",
+    "path": "roles/hetzner-cloud-controller-manager/defaults/main.yml",
+    "key": "hcloud_ccm_chart_version",
+    "kind": "helm",
+    "url": "https://charts.hetzner.cloud/index.yaml",
+    "series": 1,
+    "chart": "hcloud-cloud-controller-manager"
+  },
+  {
+    "name": "Hetzner CSI",
+    "path": "roles/hetzner-csi-provider/defaults/main.yml",
+    "key": "hcloud_csi_chart_version",
+    "kind": "helm",
+    "url": "https://charts.hetzner.cloud/index.yaml",
+    "series": 1,
+    "chart": "hcloud-csi"
+  },
+  {
+    "name": "OAuth2 Proxy",
+    "path": "roles/oauth2-proxy/defaults/main.yml",
+    "key": "oauth2_proxy_version",
+    "kind": "github",
+    "url": "https://api.github.com/repos/oauth2-proxy/oauth2-proxy/releases?per_page=100",
+    "series": 1
+  },
+  {
+    "name": "Umami",
+    "path": "roles/kpis/defaults/main.yml",
+    "key": "kpis_version",
+    "kind": "github",
+    "url": "https://api.github.com/repos/umami-software/umami/releases?per_page=100",
+    "series": 1
+  },
+  {
+    "name": "PostgreSQL",
+    "path": "roles/postgres/defaults/main.yml",
+    "key": "postgres_version",
+    "kind": "postgres",
+    "url": "https://www.postgresql.org/versions.json",
+    "series": 1
+  },
+  {
+    "name": "Kubernetes Python client",
+    "path": "roles/python/defaults/main.yml",
+    "key": "kubernetes_python_client_version",
+    "kind": "pypi",
+    "url": "https://pypi.org/pypi/kubernetes/json",
+    "series": 1
+  },
+  {
+    "name": "hetzner.hcloud",
+    "path": "requirements.yml",
+    "collection": "hetzner.hcloud",
+    "kind": "galaxy",
+    "url": "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/hetzner/hcloud/versions/?limit=100",
+    "series": 1
+  },
+  {
+    "name": "community.general",
+    "path": "requirements.yml",
+    "collection": "community.general",
+    "kind": "galaxy",
+    "url": "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/community/general/versions/?limit=100",
+    "series": 1
+  },
+  {
+    "name": "kubernetes.core",
+    "path": "requirements.yml",
+    "collection": "kubernetes.core",
+    "kind": "galaxy",
+    "url": "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/kubernetes/core/versions/?limit=100",
+    "series": 1
+  }
+]
