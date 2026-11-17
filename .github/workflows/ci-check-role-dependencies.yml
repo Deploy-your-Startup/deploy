@@ -1,0 +1,52 @@
+name: CI - Check role dependencies
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ci-check-role-dependencies
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - name: Compare pinned roles with upstream stable versions
+        id: audit
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --locked python scripts/check_role_dependencies.py
+      - name: Publish summary and maintain one audit issue
+        if: ${{ !cancelled() && hashFiles('reports/role-dependencies/report.json') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat reports/role-dependencies/report.md >> "$GITHUB_STEP_SUMMARY"
+          uv run --locked python scripts/publish_role_dependency_report.py \
+            --repo "$GH_REPO" --report reports/role-dependencies
+      - name: Retain report and replayable upstream snapshot
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: role-dependency-audit
+          path: reports/role-dependencies/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Fail when the audit could not verify every dependency
+        if: ${{ !cancelled() && steps.audit.outcome == 'failure' }}
+        run: exit 1
