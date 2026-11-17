@@ -9,7 +9,7 @@ on:
         default: ''
       environment:
         description: "Environment which should be deployed"
-        required: true
+        required: false
         default: "production"
         type: string
     secrets:
