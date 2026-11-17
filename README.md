@@ -44,6 +44,14 @@ the browser runner needs no additional preparation job. Standalone container
 E2E callers keep their own preparation step. Disabled service E2E starts no
 browser jobs; Dependabot PRs still require E2E.
 
+Projects can set `preflight_script: scripts/check-project.sh` to run a lightweight
+Bash check from the repository root in the existing preparation job, after
+checkout and before build reuse is considered. It runs on PRs, pushes and manual
+runs, including reused builds. A missing script or nonzero exit blocks the
+verification gate and publication. Scripts must return nonzero on failed checks
+(for example with `set -euo pipefail`). The default is empty, preserving existing
+callers. No deployment secrets are passed to the preparation job.
+
 Integration checks and the production image build run concurrently. With
 `run_e2e: true`, browser checks also run before the required-checks gate. A
 failed, cancelled or unexpectedly skipped check prevents publication and
