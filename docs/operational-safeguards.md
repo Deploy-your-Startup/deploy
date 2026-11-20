@@ -35,8 +35,10 @@ behaviour, not version numbers.
 
 - Kubernetes Secrets are applied with task output and diffs censored. k3s
   installation tokens are passed through the environment in censored tasks.
-- See [K3s Secret encryption at rest](k3s-secret-encryption.md) for the proposed
-  installation default and the existing-cluster migration and recovery steps.
+- New K3s clusters encrypt Kubernetes Secrets at rest. New servers inherit
+  the cluster's setting. Existing servers keep their configuration. To enable
+  encryption on an existing cluster, verify a backup and its matching server
+  token before following the [K3s migration procedure](https://docs.k3s.io/cli/secrets-encrypt#enable-secrets-encryption-on-an-existing-cluster).
 - Tailscale OAuth secrets are exchanged on the controller. New nodes receive
   distinct single-use auth keys that expire after ten minutes; already joined
   nodes request none. A supplied `tskey-auth-` key keeps its own expiry and reuse

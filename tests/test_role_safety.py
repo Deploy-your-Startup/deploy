@@ -1,5 +1,6 @@
 """Exercise role guards with Ansible's expression engine and rendered manifests."""
 import base64
+import json
 import os
 from pathlib import Path
 
@@ -407,6 +408,53 @@ def test_k3s_token_never_enters_install_command_or_task_output():
         assert "K3S_TOKEN" not in task["ansible.builtin.shell"]
         assert task["environment"]["K3S_TOKEN"]
         assert task["no_log"] is True
+
+
+@pytest.mark.parametrize(("first_server_status", "expected_config"), [
+    (None, {"secrets-encryption": True}),
+    ({"activekey": "", "stage": ""}, {"secrets-encryption": False}),
+    ({"enable": True, "activekey": "AES-CBC key", "stage": "start", "hashmatch": True},
+     {"secrets-encryption": True}),
+    ({"enable": True, "activekey": "XSalsa20-POLY1305 key", "stage": "reencrypt_finished", "hashmatch": True},
+     {"secrets-encryption": True, "secrets-encryption-provider": "secretbox"}),
+    ({"enable": False, "activekey": "", "stage": "start", "hashmatch": True}, None),
+    ({"enable": True, "activekey": "AES-CBC key", "stage": "start", "hashmatch": False}, None),
+    ({"enable": True, "activekey": "AES-CBC key", "stage": "reencrypt_active", "hashmatch": True}, None),
+])
+def test_k3s_installer_matches_cluster_secret_encryption(first_server_status, expected_config):
+    # GIVEN a new cluster or the first server's status response for a join,
+    tasks = load("roles/k3s/tasks/install-secret-encryption.yml")
+    setting = next(task["ansible.builtin.set_fact"] for task in tasks if "ansible.builtin.set_fact" in task)
+    guard = next(task["ansible.builtin.assert"] for task in tasks if "ansible.builtin.assert" in task)
+    copy = next(task["ansible.builtin.copy"] for task in tasks if "ansible.builtin.copy" in task)
+    variables = {"is_first_master": first_server_status is None}
+    if first_server_status is not None:
+        variables["k3s_first_server_encryption"] = {"stdout": json.dumps(first_server_status)}
+
+    # WHEN Ansible applies the actual settings and join guard,
+    variables["k3s_install_encryption"] = templar(variables).template(
+        trust_as_template(setting["k3s_install_encryption"])
+    )
+    engine = templar(variables)
+    if first_server_status is not None:
+        allowed = all(engine.evaluate_expression(trust_as_template(expression)) for expression in guard["that"])
+        assert allowed is (expected_config is not None)
+        if not allowed:
+            return
+
+    # THEN the persistent server configuration matches, or the join was refused.
+    assert yaml.safe_load(engine.template(trust_as_template(copy["content"]))) == expected_config
+
+
+def test_k3s_encryption_drop_in_is_only_configured_on_server_install():
+    tasks = load("roles/k3s/tasks/main.yml")
+    installations = ("Install first master (cluster-init)", "Join master")
+    for installation in installations:
+        install_index = next(index for index, task in enumerate(tasks) if task["name"] == installation)
+        configuration, install = tasks[install_index - 1:install_index + 1]
+        assert configuration["ansible.builtin.import_tasks"] == "install-secret-encryption.yml"
+        assert configuration["when"] == install["when"]
+        assert "not k3s_is_installed" in configuration["when"]
 
 
 def test_secret_manifests_are_censored_even_with_diff():
