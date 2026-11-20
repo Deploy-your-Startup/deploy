@@ -29,8 +29,9 @@ uv run --locked playwright install --only-shell chromium
 ```
 
 `./make.sh test` runs independent scenarios in parallel pytest-xdist workers
-against one Docker daemon, then runs `test_kpis_runtime_integration.py` serially
-after the parallel phase and all its container teardown have finished. Either
+against one Docker daemon. After their teardown, it runs the three-server K3s
+encryption check and the KPI browser tests serially. This leaves Docker network
+capacity for K3s and gives Chromium a stable network during navigation. Either
 phase failing makes the command fail. Grouping only the KPI scenarios on one
 worker is insufficient: other workers can still change the host network while
 Chromium is navigating. Give every container, image tag and Compose project a unique

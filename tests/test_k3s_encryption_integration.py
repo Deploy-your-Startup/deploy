@@ -13,12 +13,13 @@ from test_role_safety import load, render_k3s_encryption_config
 
 
 def docker(*args, check=True):
-    return subprocess.run(
-        ["docker", *args], capture_output=True, text=True, check=check, timeout=90
-    )
+    result = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=90)
+    if check and result.returncode:
+        pytest.fail(f"Docker {' '.join(args[:2])} failed\n{result.stderr}")
+    return result
 
 
-def wait_for_api(server):
+def wait_for_node_registration(server):
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         ready = docker(
@@ -66,7 +67,7 @@ def test_new_k3s_ha_cluster_uses_secretbox(tmp_path):
                 "--node-name", server, "--snapshotter=native",
                 "--disable=coredns,traefik,servicelb,metrics-server,local-storage",
             )
-            wait_for_api(server)
+            wait_for_node_registration(server)
 
         # THEN every server agrees on the provider and can read a Secret written by a peer.
         docker("exec", servers[-1], "kubectl", "create", "secret", "generic",
