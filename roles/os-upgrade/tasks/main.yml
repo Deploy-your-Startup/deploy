@@ -1,4 +1,10 @@
 ---
+- name: Protect containerd before upgrading to the target kernel
+  ansible.builtin.import_role:
+    name: containerd-apparmor
+  vars:
+    containerd_apparmor_target_release: "{{ os_upgrade_target }}"
+
 - name: Read whether a reboot is still pending
   ansible.builtin.stat:
     path: "{{ os_upgrade_reboot_required_file }}"

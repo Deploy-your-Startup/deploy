@@ -465,6 +465,11 @@ your-project/
 
 ## Shared infrastructure roles
 
+Ubuntu 26.04 installations and maintenance include a temporary exact-peer
+AppArmor backport for containerd, preventing PostgreSQL startup hangs without
+disabling AppArmor. Custom profiles are preserved and stop maintenance for
+review. See [compatibility and removal](docs/operational-safeguards.md#ubuntu-2604-containerd-apparmor-compatibility).
+
 The [weekly dependency audit](docs/role-dependencies.md) compares role defaults
 and Ansible collections with stable upstream releases and maintains one review
 issue. It never changes pins or deploys infrastructure.

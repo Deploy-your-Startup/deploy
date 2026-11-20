@@ -151,6 +151,11 @@ def https_health(tmp_path):
 @pytest.fixture
 def cluster(image, tmp_path, https_health):
     containers = {}
+    # Reboots/upgrades are simulated here; this container has no Ubuntu kernel
+    # policy interface. The dedicated AppArmor node tests cover that boundary.
+    kernel = tmp_path / 'kernel-boundary/sys/module/apparmor/parameters/enabled'
+    kernel.parent.mkdir(parents=True)
+    kernel.write_text('N\n')
     try:
         for node in ["node-a", "node-b"]:
             identifier = docker(
@@ -181,6 +186,7 @@ def cluster(image, tmp_path, https_health):
         (tmp_path / "vars.json").write_text(
             json.dumps(
                 {
+                    "containerd_apparmor_root": "/test/kernel-boundary",
                     "os_upgrade_environment": "production",
                     "os_upgrade_target": "26.04",
                     "os_upgrade_execute": True,
@@ -300,3 +306,19 @@ def test_failed_health_stops_fleet_and_rerun_resumes_verification(cluster):
     assert result.returncode == 0, result.stdout + result.stderr
     assert events(cluster).count(["upgrade", "node-a"]) == 1
     assert events(cluster).count(["upgrade", "node-b"]) == 1
+
+
+def test_incompatible_containerd_stops_before_any_os_upgrade(cluster):
+    # GIVEN AppArmor will be active on the target kernel but the installed
+    # runtime is unsupported, WHEN the real fleet preflight executes, THEN
+    # neither node is drained or upgraded, and no persistent policy is written.
+    root, _ = cluster
+    (root / 'kernel-boundary/sys/module/apparmor/parameters/enabled').write_text('Y\n')
+    profiles = root / 'kernel-boundary/sys/kernel/security/apparmor/profiles'
+    profiles.parent.mkdir(parents=True)
+    profiles.write_text('')
+    result = run_upgrade(cluster)
+    assert result.returncode != 0 and 'reviewed containerd' in result.stdout
+    calls = events(cluster)
+    assert not any(call[0] in ['upgrade', 'drain', 'reboot'] for call in calls)
+    assert not (root / 'kernel-boundary/etc/apparmor.d/cri-containerd.apparmor.d').exists()
