@@ -36,6 +36,10 @@
     - existing_k3s_service is defined
     - existing_k3s_service.rc != 0
 
+- name: "Configure Secret encryption for a new cluster"
+  ansible.builtin.import_tasks: install-secret-encryption.yml
+  when: is_first_master and not k3s_is_installed and not existing_k3s_db.stat.exists
+
 - name: "Install first master (cluster-init)"
   ansible.builtin.shell: |
     set -o pipefail
@@ -88,6 +92,10 @@
     port: 6443
     timeout: 180
   when: is_master and not is_first_master
+
+- name: "Match Secret encryption before joining a cluster"
+  ansible.builtin.import_tasks: install-secret-encryption.yml
+  when: is_master and not is_first_master and not k3s_is_installed
 
 - name: "Join master"
   ansible.builtin.shell: |

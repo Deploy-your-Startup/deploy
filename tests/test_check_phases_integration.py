@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('failure', ['none', 'parallel', 'browser'])
+@pytest.mark.parametrize('failure', ['none', 'parallel', 'k3s', 'browser'])
 def test_browser_checks_wait_for_parallel_teardown_and_preserve_failures(tmp_path, failure):
     # GIVEN the shipped entrypoint and real pytest workers sharing a network boundary.
     for name in ('make.sh', 'pyproject.toml', 'uv.lock', '.python-version'):
@@ -31,6 +31,15 @@ def test_container_lifecycle():
     finally:
         Path('container-removed').touch()
 ''')
+    (tests / 'test_k3s_encryption_integration.py').write_text('''
+import os
+from pathlib import Path
+
+def test_k3s_cluster():
+    assert Path('container-removed').exists(), 'K3s overlapped parallel container lifecycle'
+    Path('k3s-removed').touch()
+    assert os.environ['CHECK_PHASE_FAILURE'] != 'k3s', 'k3s failure'
+''')
     (tests / 'test_kpis_runtime_integration.py').write_text('''
 import os
 from pathlib import Path
@@ -40,7 +49,7 @@ def test_browser_navigation():
     deadline = time.monotonic() + 5
     while not Path('container-started').exists() and time.monotonic() < deadline:
         time.sleep(0.01)
-    teardown_finished = Path('container-removed').exists()
+    teardown_finished = Path('container-removed').exists() and Path('k3s-removed').exists()
     Path('browser-probed').touch()
     assert teardown_finished, 'browser overlapped container lifecycle'
     Path('browser-after-teardown').touch()
@@ -54,6 +63,7 @@ def test_browser_navigation():
     # THEN browser checks start after container teardown, and either phase can fail CI.
     assert result.returncode == (0 if failure == 'none' else 1), result.stdout + result.stderr
     assert (tmp_path / 'container-removed').exists(), result.stdout + result.stderr
+    assert (tmp_path / 'k3s-removed').exists() == (failure != 'parallel'), result.stdout + result.stderr
     assert (tmp_path / 'browser-probed').exists() == (failure != 'parallel'), result.stdout + result.stderr
     assert (tmp_path / 'browser-after-teardown').exists() == (failure != 'parallel'), result.stdout + result.stderr
     if failure != 'none':
