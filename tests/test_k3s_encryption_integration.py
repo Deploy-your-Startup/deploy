@@ -19,23 +19,23 @@ def docker(*args, check=True):
     return result
 
 
-def wait_for_node_registration(server):
+def wait_for_encryption_status(server):
+    # Node registration can precede K3s publishing the encryption hash.
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        ready = docker(
-            "exec", server, "kubectl", "--request-timeout=3s",
-            "get", f"node/{server}", check=False,
+        result = docker(
+            "exec", server, "k3s", "secrets-encrypt", "status", "--output", "json", check=False,
         )
-        if ready.returncode == 0:
-            return
+        if result.returncode == 0:
+            status = json.loads(result.stdout)
+            if status.get("hashmatch") is True:
+                return status
         time.sleep(2)
     logs = docker("logs", "--tail=40", server, check=False)
-    pytest.fail(f"{server} did not register with the API\n{ready.stderr}\n{logs.stderr}")
-
-
-def encryption_status(server):
-    result = docker("exec", server, "k3s", "secrets-encrypt", "status", "--output", "json")
-    return json.loads(result.stdout)
+    pytest.fail(
+        f"{server} did not report matching encryption hashes\n"
+        f"{result.stdout}{result.stderr}\n{logs.stderr}"
+    )
 
 
 def test_new_k3s_ha_cluster_uses_secretbox(tmp_path):
@@ -53,7 +53,7 @@ def test_new_k3s_ha_cluster_uses_secretbox(tmp_path):
         # GIVEN a fresh etcd cluster and the production role's server config,
         for i, server in enumerate(servers):
             # WHEN each joining server uses the first server's real status output,
-            status = encryption_status(servers[0]) if i else None
+            status = wait_for_encryption_status(servers[0]) if i else None
             config = render_k3s_encryption_config(status)
             assert config is not None
             config_dir = tmp_path / server
@@ -67,14 +67,14 @@ def test_new_k3s_ha_cluster_uses_secretbox(tmp_path):
                 "--node-name", server, "--snapshotter=native",
                 "--disable=coredns,traefik,servicelb,metrics-server,local-storage",
             )
-            wait_for_node_registration(server)
+            wait_for_encryption_status(server)
 
         # THEN every server agrees on the provider and can read a Secret written by a peer.
         docker("exec", servers[-1], "kubectl", "create", "secret", "generic",
                "encryption-check", "--from-literal=check=ok")
         for server in servers:
-            status = encryption_status(server)
-            assert status["enable"] and status["hashmatch"]
+            status = wait_for_encryption_status(server)
+            assert status["enable"]
             assert status["activekey"].startswith("XSalsa20-POLY1305 ")
             secret = docker("exec", server, "kubectl", "get", "secret",
                             "encryption-check", "-o", "json")
