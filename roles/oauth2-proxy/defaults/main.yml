@@ -32,6 +32,7 @@ oauth2_proxy_skip_auth_route: "!=^/private_api"
 # `<issuer>=<audience>`. This is the native-app path: the token is verified
 # against the issuer's JWKS and passed upstream unchanged.
 # Set auth_audience explicitly to the intended API audience.
+oauth2_proxy_bearer_enabled: true
 oauth2_proxy_extra_jwt_issuers: "{{ oauth2_proxy_oidc_issuer_url }}={{ auth_audience }}"
 
 # Required Vault values. Empty defaults let the safety assert fail clearly.
