@@ -95,8 +95,9 @@ The E2E directory supplies two small files:
 
 - `Dockerfile`, built with the **repository root** as its context. It contains
   the project's test tools and application dependencies, separate from the
-  production image. Each shard builds its image directly from the shared Docker
-  layer cache, avoiding a separate image-upload/download stage before tests.
+  production image. Each shard builds into its runner's Docker daemon.
+  The job summary includes the build time, and the workflow retains test reports
+  and failure diagnostics.
 - `compose.yml`, with a `test` service using `${E2E_IMAGE}` and the local
   dependencies it needs. Do not publish fixed host ports or use external/shared
   volumes. Each shard receives its own Compose project and database.

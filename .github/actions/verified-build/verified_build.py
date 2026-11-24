@@ -31,6 +31,10 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
+class InvalidEvidence(ValueError):
+    """A rejection with a fixed message safe to show in Actions."""
+
+
 def api(path, destination=None, limit=MAX_PROOF_BYTES):
     base = os.environ.get('GITHUB_API_URL', 'https://api.github.com').rstrip('/')
     request = urllib.request.Request(base + '/repos/' + os.environ['GITHUB_REPOSITORY'] + '/' + path,
@@ -98,14 +102,14 @@ def artifact(artifact_id, run_id, name, expected_digest=None):
     if (item['expired'] or item['name'] != name or item['workflow_run']['id'] != run_id
             or not re.fullmatch('sha256:[0-9a-f]{64}', item.get('digest', ''))
             or (expected_digest is not None and item['digest'] != expected_digest)):
-        raise ValueError('Artifact identity mismatch')
+        raise InvalidEvidence('An artifact was expired or did not match its recorded identity')
     return item
 
 
 def download(item, destination, limit):
     digest = api(f"actions/artifacts/{int(item['id'])}/zip", destination, limit)
     if digest != item['digest']:
-        raise ValueError('Artifact digest mismatch')
+        raise InvalidEvidence('An artifact download did not match its recorded digest')
 
 
 def validate(proof_id, expected, key):
@@ -117,10 +121,10 @@ def validate(proof_id, expected, key):
         download(metadata, archive, MAX_PROOF_BYTES)
         with zipfile.ZipFile(archive) as zipped:
             if zipped.namelist() != ['proof.json'] or zipped.getinfo('proof.json').file_size > MAX_PROOF_BYTES:
-                raise ValueError('Invalid proof archive')
+                raise InvalidEvidence('The proof archive had an invalid format')
             proof = json.loads(zipped.read('proof.json'))
     if proof['identity'] != expected or proof['run_id'] != run_id:
-        raise ValueError('Proof does not match this source and configuration')
+        raise InvalidEvidence('The proof did not match this source and configuration')
     run = api('actions/runs/' + str(int(run_id)))
     created = datetime.fromisoformat(run['created_at'].replace('Z', '+00:00'))
     if (run['event'] != 'pull_request' or run['status'] != 'completed' or run['conclusion'] != 'success'
@@ -130,43 +134,50 @@ def validate(proof_id, expected, key):
             or run['head_repository']['full_name'] != expected['repository']
             or not timedelta(0) <= datetime.now(timezone.utc) - created <= MAX_AGE
             or not runtime_matches(run, expected['runtime'])):
-        raise ValueError('PR run is not eligible')
+        raise InvalidEvidence('The PR run was outdated or did not meet reuse requirements')
     source_sha = proof['source_sha']
     if not re.fullmatch('[0-9a-f]{40}', source_sha):
-        raise ValueError('Invalid source commit')
+        raise InvalidEvidence('The proof contained an invalid source commit')
     commit = api('git/commits/' + source_sha)
     # GitHub commonly clears run.pull_requests after merging/deleting the branch.
     # Recover the closed PR through its run-bound head commit, not a proof-supplied number.
     if not re.fullmatch('[0-9a-f]{40}', run['head_sha']):
-        raise ValueError('Invalid PR head')
+        raise InvalidEvidence('GitHub returned an invalid PR head')
     pulls = run.get('pull_requests') or api(f"commits/{run['head_sha']}/pulls?per_page=100")
     parents = [parent['sha'] for parent in commit['parents']]
     matching = {(pull['base']['sha'], pull['head']['sha']) for pull in pulls
                 if [pull['base']['sha'], pull['head']['sha']] == parents
                 and pull['head']['sha'] == run['head_sha']}
     if len(matching) != 1:
-        raise ValueError('Missing original PR merge identity')
+        raise InvalidEvidence('GitHub did not identify the original PR merge')
     base, head = matching.pop()
     if (not all(re.fullmatch('[0-9a-f]{40}', sha) for sha in (base, head))
             or head != run['head_sha'] or commit['tree']['sha'] != expected['tree']
             or [parent['sha'] for parent in commit['parents']] != [base, head]):
-        raise ValueError('Proof is not the checked PR source')
+        raise InvalidEvidence('The proof did not point to the checked PR source')
     # The proof itself is untrusted. Reconstruct the merge tree from GitHub's
     # recorded base/head; never accept an arbitrary commit supplied in a JSON file.
     comparison = api(f'compare/{base}...{head}')
     ancestor = comparison['merge_base_commit']['sha']
     if not re.fullmatch('[0-9a-f]{40}', ancestor):
-        raise ValueError('Invalid merge base')
+        raise InvalidEvidence('GitHub returned an invalid merge base')
     git('fetch', '--quiet', '--no-tags', '--depth=1', 'origin', base, head, ancestor)
     reconstructed = git('merge-tree', '--write-tree', '--merge-base=' + ancestor, base, head).splitlines()[0]
     if reconstructed != expected['tree']:
-        raise ValueError('PR merge tree differs from this source')
+        raise InvalidEvidence('The reconstructed PR merge tree differed from the push')
     services = {item['service'] for item in expected['matrix']['include']}
     if set(proof['images']) != services:
-        raise ValueError('Incomplete service images')
+        raise InvalidEvidence('The proof did not cover all service images')
     for service, item in proof['images'].items():
         artifact(item['id'], run_id, f"{service}-production-image-{proof['attempt']}", item['digest'])
     return proof
+
+
+def report_selection(message):
+    print(message)
+    if os.environ['GITHUB_EVENT_NAME'] == 'push' and os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+            summary.write(f'PR build reuse: {message}\n')
 
 
 def prepare():
@@ -174,7 +185,7 @@ def prepare():
     try:
         expected, key, _ = identity()
         if expected is None:
-            print('Full checks: reuse disabled or runtime/context not eligible.')
+            report_selection('Full checks because reuse is disabled or the runtime or build context is ineligible.')
             return
         output(key=key)
         if os.environ['GITHUB_EVENT_NAME'] != 'push':
@@ -182,24 +193,27 @@ def prepare():
             return
         query = urllib.parse.urlencode({'name': 'verified-pr-' + key, 'per_page': 100})
         candidates = api('actions/artifacts?' + query)['artifacts']
+        if not candidates:
+            report_selection('Full checks because no evidence matched the current tree, runtime and configuration.')
+            return
+        rejections = set()
         for item in candidates:
             try:
                 proof = validate(item['id'], expected, key)
-            except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
-                # Report the category only; exception text can contain signed URLs.
-                print(f'PR evidence rejected: {type(error).__name__}')
+            except InvalidEvidence as error:
+                rejections.add(str(error))
+                continue
+            except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
+                # External exception text can contain signed URLs.
+                rejections.add('Evidence or GitHub metadata could not be read')
                 continue
             output(reuse='true', proof_id=item['id'])
-            message = f"Reuse verified PR run {proof['run_id']} for tree {expected['tree']}."
-            print(message)
-            if os.environ.get('GITHUB_STEP_SUMMARY'):
-                with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-                    summary.write(message + '\n')
+            report_selection(f"Reused verified PR run {int(proof['run_id'])} for tree {expected['tree']}.")
             return
+        report_selection('Full checks because evidence could not be verified. ' + '. '.join(sorted(rejections)) + '.')
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         # API errors, unavailable artifacts and direct pushes must not bypass tests.
-        pass
-    print('Full checks: no verifiable equivalent PR build found.')
+        report_selection('Full checks because the evidence lookup failed.')
 
 
 def record():

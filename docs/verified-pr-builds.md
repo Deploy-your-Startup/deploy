@@ -73,6 +73,8 @@ workflow revision, which invalidates earlier evidence.
 
 Reuse saves repeated builds and test setup, but adds artifact storage and image
 transfer, with one-day retention. The prepare/gate/publish jobs still execute.
+The push run's preparation summary shows whether it reused a PR run or why
+it ran full checks. GitHub and Git errors appear as fixed categories.
 Measure representative rounded job minutes and storage before claiming savings.
 Superseded PR runs are cancelled per workflow/ref/environment/service. Running
 production workflows are not interrupted by a newer push.
