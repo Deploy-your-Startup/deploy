@@ -1,0 +1,10 @@
+---
+keycloak_namespace: authentication
+keycloak_realm: "{{ project_name }}"
+keycloak_client_id: "{{ project_name }}"
+keycloak_client_origin: "https://{{ base_domain }}"
+keycloak_client_secret_name: keycloak-client
+# Empty leaves session policy under operator control. Values are seconds.
+keycloak_realm_session_settings: {}
+# Null preserves operator-managed passkeys; true enables enrollment and login.
+keycloak_realm_passkeys_enabled: null

@@ -1,0 +1,15 @@
+---
+- name: Inspect the shared service without changing cluster resources
+  ansible.builtin.include_tasks:
+    file: diagnostics.yml
+    apply:
+      tags: keycloak-status
+  tags: [never, keycloak-status]
+  when: "'keycloak-status' in ansible_run_tags"
+
+- name: Check shared Keycloak ownership and installation
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Install or explicitly update shared Keycloak from the owner project
+  ansible.builtin.include_tasks: install.yml
+  when: not (keycloak_present | bool) or (keycloak_upgrade | bool)

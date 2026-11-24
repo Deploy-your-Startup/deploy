@@ -47,7 +47,7 @@ Register `https://<oauth2_proxy_host>/oauth2/callback` with the OIDC provider.
 `oauth2_proxy_version` pins the image (`v7.13.0`). The protected-route default
 is `oauth2_proxy_skip_auth_route: "!=^/private_api"`; it must retain its leading
 `!`. `oauth2_proxy_extra_skip_auth_routes` defaults to `["OPTIONS=^/private_api"]`.
-`oauth2_proxy_extra_jwt_issuers` defaults to `{{ auth_domain }}/={{ auth_audience }}`;
+`oauth2_proxy_extra_jwt_issuers` defaults to `{{ oauth2_proxy_oidc_issuer_url }}={{ auth_audience }}`;
 the issuer's trailing slash matters because token issuers are compared literally.
 There is no implicit audience fallback. `oauth2_proxy_extra_args` defaults to
 `[]`; review overrides carefully because flags and extra skip routes can weaken
@@ -82,3 +82,32 @@ memory limit and health probes; a regression should fail within the pod's limit
 rather than exhaust the node. Project development and end-to-end tests should
 use the real proxy with a mock OIDC provider and the same routing, preflight and
 authentication flags.
+
+## Keycloak
+
+The existing defaults keep provider `oidc` and Auth0's trailing issuer slash.
+For a realm created by [keycloak-client](../keycloak-client/README.md), set:
+
+```yaml
+auth_audience: example-startup
+oauth2_proxy_provider: keycloak-oidc
+oauth2_proxy_oidc_issuer_url: https://auth.example.com/realms/example-startup
+oauth2_proxy_existing_secret: keycloak-client
+oauth2_proxy_host: app.example.com
+oauth2_proxy_cookie_domain: app.example.com
+oauth2_proxy_whitelist_domain: app.example.com
+```
+
+The selected Secret must exist in the application's `k8s_namespace` and contain
+`OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET` and
+`OAUTH2_PROXY_COOKIE_SECRET`. Include the client role before this role. The proxy
+reuses those values and censors secret reads, facts and writes. Leaving
+`oauth2_proxy_existing_secret` empty keeps the existing Vault-backed inputs.
+Both providers use PKCE S256. The issuer must match discovery exactly; Keycloak
+realm issuers do not have Auth0's trailing slash.
+
+The default upstream is the application's backend on port 8000. Override
+`oauth2_proxy_upstream` if it differs. The default protects `/private_api` only;
+review `oauth2_proxy_skip_auth_route` and routing explicitly for applications
+that require whole-origin authentication. The proxy does not define application
+permissions or migrate existing login systems.

@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: "{{ keycloak_namespace }}"
+  annotations:
+{% if keycloak_tls_termination == 'ingress' %}
+    cert-manager.io/issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: ""
+{% else %}
+    cert-manager.io/issuer: ""
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.tls: "false"
+    traefik.ingress.kubernetes.io/router.middlewares: "{{ keycloak_namespace }}-keycloak-external-tls@kubernetescrd"
+{% endif %}
+spec:
+  ingressClassName: traefik
+{% if keycloak_tls_termination == 'ingress' %}
+  tls:
+    - hosts: ["{{ keycloak_hostname }}"]
+      secretName: keycloak-tls
+{% else %}
+  tls: []
+{% endif %}
+  rules:
+    - host: "{{ keycloak_hostname }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port: {name: http}

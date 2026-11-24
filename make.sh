@@ -10,8 +10,10 @@ case "${1:-help}" in
   # teardown before starting the KPI browser checks.
   test)
     uv run --locked pytest -n auto --dist loadgroup \
-      --ignore=tests/test_k3s_encryption_integration.py --ignore=tests/test_kpis_runtime_integration.py
-    uv run --locked pytest -n0 tests/test_k3s_encryption_integration.py tests/test_kpis_runtime_integration.py
+      --ignore=tests/test_k3s_encryption_integration.py --ignore=tests/test_kpis_runtime_integration.py \
+      --ignore=tests/test_keycloak_runtime_integration.py --ignore=tests/test_keycloak_client_integration.py
+    uv run --locked pytest -n0 tests/test_k3s_encryption_integration.py tests/test_kpis_runtime_integration.py \
+      tests/test_keycloak_runtime_integration.py tests/test_keycloak_client_integration.py
     ;;
   check) "$0" lint; "$0" test; git diff --check ;;
   *) echo "Usage: ./make.sh {format|lint|test|check}" ;;

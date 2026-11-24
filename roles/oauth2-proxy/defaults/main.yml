@@ -4,6 +4,10 @@
 # Override in deployment/group_vars/{all,production}.yml.
 
 oauth2_proxy_version: v7.13.0
+oauth2_proxy_provider: oidc
+# Keep Auth0's exact trailing slash by default; Keycloak supplies its realm issuer.
+oauth2_proxy_oidc_issuer_url: "{{ auth_domain }}/"
+oauth2_proxy_existing_secret: ""
 
 # The service oauth2-proxy puts itself in front of. It is a reverse proxy, not
 # a ForwardAuth callee, so authenticated requests are passed through to here.
@@ -28,7 +32,7 @@ oauth2_proxy_skip_auth_route: "!=^/private_api"
 # `<issuer>=<audience>`. This is the native-app path: the token is verified
 # against the issuer's JWKS and passed upstream unchanged.
 # Set auth_audience explicitly to the intended API audience.
-oauth2_proxy_extra_jwt_issuers: "{{ auth_domain }}/={{ auth_audience }}"
+oauth2_proxy_extra_jwt_issuers: "{{ oauth2_proxy_oidc_issuer_url }}={{ auth_audience }}"
 
 # Required Vault values. Empty defaults let the safety assert fail clearly.
 oauth2_proxy_client_id: ""

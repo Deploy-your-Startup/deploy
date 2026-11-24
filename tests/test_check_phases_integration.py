@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('failure', ['none', 'parallel', 'k3s', 'browser'])
+@pytest.mark.parametrize('failure', ['none', 'parallel', 'k3s', 'browser', 'keycloak', 'passkeys'])
 def test_browser_checks_wait_for_parallel_teardown_and_preserve_failures(tmp_path, failure):
     # GIVEN the shipped entrypoint and real pytest workers sharing a network boundary.
     for name in ('make.sh', 'pyproject.toml', 'uv.lock', '.python-version'):
@@ -55,6 +55,19 @@ def test_browser_navigation():
     Path('browser-after-teardown').touch()
     assert os.environ['CHECK_PHASE_FAILURE'] != 'browser', 'browser failure'
 ''')
+    for filename, phase, previous in (
+        ('test_keycloak_runtime_integration.py', 'keycloak', 'browser-after-teardown'),
+        ('test_keycloak_client_integration.py', 'passkeys', 'keycloak-after-teardown'),
+    ):
+        (tests / filename).write_text(f"""
+import os
+from pathlib import Path
+
+def test_identity_browser():
+    assert Path({previous!r}).exists(), 'identity browser overlapped earlier phase'
+    Path({(phase + '-after-teardown')!r}).touch()
+    assert os.environ['CHECK_PHASE_FAILURE'] != {phase!r}, {phase!r} + ' failure'
+""")
     # WHEN make.sh runs the real locked pytest, with two workers available.
     result = subprocess.run(['bash', str(tmp_path / 'make.sh'), 'test'], cwd=tmp_path,
         env={**os.environ, 'UV_PROJECT_ENVIRONMENT': str(ROOT / '.venv'),

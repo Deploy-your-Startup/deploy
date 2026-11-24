@@ -1,0 +1,125 @@
+---
+- name: Create the shared authentication namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ keycloak_namespace }}"
+        labels:
+          startup.deploy/service: keycloak
+
+- name: Read existing Keycloak credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_existing_secret
+  no_log: true
+
+- name: Read the existing authentication database volume
+  kubernetes.core.k8s_info:
+    kind: PersistentVolumeClaim
+    namespace: "{{ keycloak_namespace }}"
+    name: postgres
+  register: keycloak_database_volume
+
+- name: Refuse to replace lost credentials for an existing database
+  ansible.builtin.assert:
+    that:
+      - keycloak_database_volume.resources | length == 0 or keycloak_existing_secret.resources | length == 1
+    fail_msg: Restore the Keycloak Secret from backup before deploying an existing database.
+
+- name: Generate credentials only for the first installation
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: keycloak
+        namespace: "{{ keycloak_namespace }}"
+      type: Opaque
+      stringData:
+        admin_username: "{{ keycloak_admin_username }}"
+        admin_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}"
+        database_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}"
+  when: keycloak_existing_secret.resources | length == 0
+  no_log: true
+  diff: false
+
+- name: Read the persisted credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_credentials
+  no_log: true
+
+- name: Deploy the independent persistent authentication database
+  ansible.builtin.include_role:
+    name: postgres
+  vars:
+    k8s_namespace: "{{ keycloak_namespace }}"
+    project_name: "{{ 'keycloak-' ~ keycloak_cluster_id[:12] if keycloak_cluster_id is defined else keycloak_namespace }}"
+    postgres_version: "{{ keycloak_database_version }}"
+    postgres_port: 5432
+    postgres_pv_name: "{{ keycloak_namespace }}-postgres"
+    postgres_data_path: "/srv/{{ keycloak_namespace }}/postgres"
+    postgres_storage_node: "{{ keycloak_database_storage_node }}"
+    postgres_admin_username: keycloak
+    postgres_admin_password: "{{ keycloak_credentials.resources[0].data.database_password | b64decode }}"
+
+- name: Prepare the authentication namespace certificate issuer
+  ansible.builtin.include_role:
+    name: cert-manager
+  vars:
+    k8s_namespace: "{{ keycloak_namespace }}"
+  when: keycloak_tls_termination == 'ingress'
+
+- name: Normalize the public origin behind an external TLS proxy
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'external-tls-middleware.yml') }}"
+  when: keycloak_tls_termination == 'external_proxy'
+
+- name: Apply Keycloak service and HTTPS ingress
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', item) }}"
+  loop:
+    - service.yml
+    - ingress.yml
+
+- name: Stop namespace certificate issuance when the external proxy owns TLS
+  kubernetes.core.k8s:
+    state: absent
+    api_version: cert-manager.io/v1
+    kind: Certificate
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak-tls
+  when: keycloak_tls_termination == 'external_proxy'
+
+- name: Deploy Keycloak in production mode
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'deployment.yml') }}"
+    wait: true
+    wait_timeout: "{{ keycloak_ready_timeout }}"
+    wait_condition:
+      type: Available
+      status: "True"
+
+- name: Wait for the public certificate
+  kubernetes.core.k8s_info:
+    api_version: cert-manager.io/v1
+    kind: Certificate
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak-tls
+    wait: true
+    wait_timeout: "{{ keycloak_ready_timeout }}"
+    wait_condition:
+      type: Ready
+      status: "True"
+  when: keycloak_tls_termination == 'ingress'

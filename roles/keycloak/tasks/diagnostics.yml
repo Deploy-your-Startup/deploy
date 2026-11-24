@@ -1,0 +1,145 @@
+---
+- name: Read authentication workloads and certificate status
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - get
+      - deployments,pods,ingresses,certificates,certificaterequests,orders,challenges
+      - --namespace
+      - "{{ keycloak_namespace }}"
+      - --output=json
+  register: keycloak_diagnostics
+  changed_when: false
+  # Print only selected status fields below, never pod configuration or credentials.
+  no_log: true
+
+- name: Report authentication readiness and certificate failures
+  ansible.builtin.debug:
+    msg:
+      kind: "{{ item.kind }}"
+      name: "{{ item.metadata.name }}"
+      phase: "{{ item.status.phase | default(item.status.state | default('')) }}"
+      ready_replicas: "{{ item.status.readyReplicas | default('') }}"
+      reason: "{{ item.status.reason | default('') }}"
+      conditions: "{{ item.status.conditions | default([]) }}"
+      ingress_class: "{{ item.spec.ingressClassName | default('') }}"
+      routes: "{{ item.spec.rules | default([]) }}"
+  loop: "{{ (keycloak_diagnostics.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+- name: Read installed ingress classes
+  ansible.builtin.command:
+    argv: [kubectl, get, ingressclasses, --output=json]
+  register: keycloak_ingress_classes
+  changed_when: false
+  no_log: true
+
+- name: Report installed ingress controllers
+  ansible.builtin.debug:
+    msg:
+      name: "{{ item.metadata.name }}"
+      controller: "{{ item.spec.controller }}"
+  loop: "{{ (keycloak_ingress_classes.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Read Traefik ingress provider configuration
+  ansible.builtin.command:
+    argv: [kubectl, get, deployments, --namespace, kube-system, --selector=app.kubernetes.io/name=traefik, --output=json]
+  register: keycloak_ingress_controller
+  changed_when: false
+  no_log: true
+
+- name: Report ingress provider and public entrypoint flags
+  ansible.builtin.debug:
+    msg:
+      image: "{{ item.image }}"
+      flags: "{{ item.args | default([]) | select('match', '(?i)^--(providers[.]kubernetesingress|entrypoints[.]web)') | list }}"
+  loop: "{{ (keycloak_ingress_controller.stdout | from_json)['items'] | map(attribute='spec.template.spec.containers') | flatten }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read public TCP port owners on the deployment node
+  ansible.builtin.command:
+    argv: [ss, --tcp, --listening, --numeric, --processes, '( sport = :80 or sport = :443 or sport = :30080 or sport = :30443 )']
+  register: keycloak_public_listeners
+  changed_when: false
+
+- name: Report public TCP port owners
+  ansible.builtin.debug:
+    msg: "{{ keycloak_public_listeners.stdout_lines }}"
+
+- name: Read container names and published ports when Docker owns public ingress
+  ansible.builtin.command:
+    argv: [docker, ps, --format, '{% raw %}{{.Names}} {{.Image}} {{.Ports}}{% endraw %}']
+  when: "'docker-proxy' in keycloak_public_listeners.stdout"
+  register: keycloak_public_containers
+  changed_when: false
+
+- name: Report published container ports
+  ansible.builtin.debug:
+    msg: "{{ keycloak_public_containers.stdout_lines | default([]) }}"
+
+- name: Read the cluster ingress service ports
+  ansible.builtin.command:
+    argv: [kubectl, get, services, --namespace, kube-system, --selector=app.kubernetes.io/name=traefik, --output=json]
+  register: keycloak_ingress_services
+  changed_when: false
+  no_log: true
+
+- name: Report the cluster ingress service ports
+  ansible.builtin.debug:
+    msg:
+      name: "{{ item.metadata.name }}"
+      ports: "{{ item.spec.ports }}"
+      node_address: "{{ ansible_facts.default_ipv4.address | default('unavailable') }}"
+  loop: "{{ (keycloak_ingress_services.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Read Coolify proxy configuration mount locations
+  ansible.builtin.command:
+    argv: [docker, inspect, coolify-proxy, --format, '{% raw %}{{json .Mounts}}{% endraw %}']
+  when: "'coolify-proxy ' in keycloak_public_containers.stdout | default('')"
+  register: keycloak_edge_mounts
+  changed_when: false
+  no_log: true
+
+- name: Report Coolify proxy configuration mount locations
+  ansible.builtin.debug:
+    msg:
+      source: "{{ item.Source }}"
+      destination: "{{ item.Destination }}"
+  loop: "{{ keycloak_edge_mounts.stdout | default('[]') | from_json }}"
+  loop_control:
+    label: "{{ item.Destination }}"
+
+- name: Compare the pending HTTP challenge on the node and ingress NodePort
+  ansible.builtin.uri:
+    url: "http://{{ item }}/.well-known/acme-challenge/{{ keycloak_pending_challenge.spec.token }}"
+    headers:
+      Host: "{{ keycloak_pending_challenge.spec.dnsName }}"
+    use_proxy: false
+    timeout: 10
+    return_content: true
+  vars:
+    keycloak_pending_challenge: "{{ (keycloak_diagnostics.stdout | from_json)['items'] | selectattr('kind', 'equalto', 'Challenge') | first | default({}) }}"
+  when: keycloak_pending_challenge.spec.token is defined
+  loop: ["127.0.0.1:80", "127.0.0.1:30080", "{{ ansible_host | default('127.0.0.1') }}:80", "{{ keycloak_hostname }}:80"]
+  register: keycloak_challenge_probes
+  failed_when: false
+  changed_when: false
+  no_log: true
+
+- name: Report local HTTP challenge status codes
+  ansible.builtin.debug:
+    msg:
+      address: "{{ item.item }}"
+      status: "{{ item.status | default('not tested') }}"
+      challenge_matches: "{{ item.content is defined and item.content | trim == keycloak_pending_challenge.spec.key | default('') }}"
+  vars:
+    keycloak_pending_challenge: "{{ (keycloak_diagnostics.stdout | from_json)['items'] | selectattr('kind', 'equalto', 'Challenge') | first | default({}) }}"
+  loop: "{{ keycloak_challenge_probes.results }}"
+  loop_control:
+    label: "{{ item.item }}"

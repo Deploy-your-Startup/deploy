@@ -273,7 +273,8 @@ def oauth2_proxy_variables(**overrides):
 
 
 def oauth2_proxy_guard_allows(variables):
-    guard = load('roles/oauth2-proxy/tasks/main.yml')[0]['ansible.builtin.assert']
+    guard = next(task['ansible.builtin.assert'] for task in
+                 load('roles/oauth2-proxy/tasks/main.yml') if 'ansible.builtin.assert' in task)
     return all(templar(variables).evaluate_expression(trust_as_template(expression))
                for expression in guard['that'])
 
@@ -331,9 +332,14 @@ def test_oauth2_proxy_safety_assert_rejects_unsafe_configuration(overrides):
     # THEN it rejects the configuration before any Kubernetes resource is applied.
     assert not oauth2_proxy_guard_allows(variables)
     tasks = load('roles/oauth2-proxy/tasks/main.yml')
-    assert 'ansible.builtin.assert' in tasks[0]
-    assert tasks[1]['no_log'] is True
-    assert tasks[1]['diff'] is False
+    guard_index = next(i for i, task in enumerate(tasks) if 'ansible.builtin.assert' in task)
+    mutations = [(i, task) for i, task in enumerate(tasks)
+                 if task.get('kubernetes.core.k8s', {}).get('state') == 'present']
+    assert mutations and all(guard_index < i for i, _ in mutations)
+    secret_task = next(task for _, task in mutations
+                       if 'secret.yml' in task['kubernetes.core.k8s'].get('definition', ''))
+    assert secret_task['no_log'] is True
+    assert secret_task['diff'] is False
 
 
 @pytest.mark.parametrize('length', [16, 24, 32])

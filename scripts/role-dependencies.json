@@ -106,5 +106,21 @@
     "kind": "galaxy",
     "url": "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/kubernetes/core/versions/?limit=100",
     "series": 1
+  },
+  {
+    "name": "Keycloak",
+    "path": "roles/keycloak/defaults/main.yml",
+    "key": "keycloak_version",
+    "kind": "github",
+    "url": "https://api.github.com/repos/keycloak/keycloak/releases?per_page=100",
+    "series": 2
+  },
+  {
+    "name": "Keycloak PostgreSQL",
+    "path": "roles/keycloak/defaults/main.yml",
+    "key": "keycloak_database_version",
+    "kind": "postgres",
+    "series": 1,
+    "url": "https://www.postgresql.org/versions.json"
   }
 ]
