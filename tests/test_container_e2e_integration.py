@@ -186,10 +186,12 @@ def test_browser_matrix_runs_without_an_image_transfer_dependency(tmp_path, shar
     runner = yaml.load((ROOT / ".github/workflows/container-e2e-shards.yml").read_text(), Loader=yaml.BaseLoader)
     assert set(runner["jobs"]) == {"test"}
     steps = runner["jobs"]["test"]["steps"]
-    build = next(step for step in steps if step.get("uses", "").startswith("docker/build-push-action@"))
-    # The runner's own builder writes into its daemon; no tarball or cache export.
+    build = next(step for step in steps if step.get("name") == "Build browser image on this runner")
+    assert 'docker build --file "$E2E_DIRECTORY/Dockerfile" --tag "startup-e2e:$GITHUB_RUN_ID" .' in build["run"]
+    assert build["env"]["E2E_DIRECTORY"] == "${{ inputs.directory }}"
+    # The browser build stays local and produces no build record artifact.
     assert not any(step.get("uses", "").startswith("docker/setup-buildx-action@") for step in steps)
-    assert not {"load", "cache-to", "outputs"} & set(build["with"])
+    assert not any(step.get("uses", "").startswith("docker/build-push-action@") for step in steps)
     assert not any(step.get("uses", "").startswith("actions/download-artifact@") for step in steps)
 
 

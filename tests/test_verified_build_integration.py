@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from urllib.parse import parse_qs, urlsplit
 import zipfile
 
 import pytest
@@ -76,7 +77,8 @@ def github(tmp_path):
                 self.send_error(403)
                 return
             if path.startswith('actions/artifacts?'):
-                value = {'artifacts': list(artifacts.values())}
+                names = parse_qs(urlsplit(path).query).get('name', [])
+                value = {'artifacts': [item for item in artifacts.values() if item['name'] in names]}
             elif path == 'actions/runs/100/artifacts?per_page=100':
                 value = {'artifacts': list(artifacts.values())}
             elif path.startswith('actions/artifacts/'):
@@ -169,6 +171,7 @@ def test_matching_push_reuses_every_image_from_successful_pr(github, merge_style
     result, values = github['invoke']('prepare')
     assert result.returncode == 0, result.stderr
     assert values == {'reuse': 'true', 'record': 'false', 'key': key, 'proof_id': '900'}
+    assert 'Reused verified PR run 100' in result.stdout
     result, _ = github['invoke']('restore', BUILD_PROOF_ID='900')
     # THEN publication receives the exact immutable archive, not a rebuild.
     assert result.returncode == 0, result.stderr
@@ -187,14 +190,16 @@ def test_local_mode_evidence_cannot_replace_ci_e2e_after_policy_changes(github):
     assert values['reuse'] == 'false'
 
 
-def test_direct_push_without_any_pr_runs_full_checks(github):
+def test_direct_push_without_any_pr_runs_full_checks(github, tmp_path):
     # GIVEN a repository with no successful PR evidence (direct-to-main is allowed).
     # WHEN the actual prepare command runs on push.
-    result, values = github['invoke']('prepare')
+    summary = tmp_path / 'summary'
+    result, values = github['invoke']('prepare', GITHUB_STEP_SUMMARY=str(summary))
     # THEN no checks can be skipped and no branch-protection setting is required.
     assert result.returncode == 0
     assert values['reuse'] == 'false'
     assert 'proof_id' not in values
+    assert 'no evidence matched the current tree, runtime and configuration' in summary.read_text()
 
 
 def test_a_parallel_main_change_cannot_reuse_the_old_pr_result(github):
@@ -211,6 +216,7 @@ def test_a_parallel_main_change_cannot_reuse_the_old_pr_result(github):
     # THEN the old PR cannot authorize skipping any current checks.
     assert result.returncode == 0
     assert values['reuse'] == 'false'
+    assert 'no evidence matched' in result.stdout
 
 
 def test_forged_source_tree_cannot_be_used_as_test_evidence(github):
@@ -352,7 +358,7 @@ def test_closed_pr_reuse_with_the_shipped_job_permissions(github, job, deny_pull
         assert result.returncode == 0, result.stderr
         assert values['reuse'] == ('false' if deny_pull_requests else 'true'), result.stdout
         if deny_pull_requests:
-            assert 'PR evidence rejected: HTTPError' in result.stdout
+            assert 'Evidence or GitHub metadata could not be read' in result.stdout
     elif deny_pull_requests:
         assert result.returncode != 0
         assert not (github['runtime'] / 'production-image.tar').exists()
