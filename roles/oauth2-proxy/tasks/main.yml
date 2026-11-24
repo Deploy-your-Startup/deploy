@@ -50,15 +50,13 @@
         )
       - oauth2_proxy_client_id | length > 0
       - oauth2_proxy_client_secret | length > 0
-      # Auth0 issues `iss` with a trailing slash and oauth2-proxy compares it
-      # literally, so a stripped slash rejects every token.
-      - oauth2_proxy_extra_jwt_issuers is search('=')
+      - not (oauth2_proxy_bearer_enabled | bool) or oauth2_proxy_extra_jwt_issuers is search('=')
     quiet: true
     fail_msg: >-
       oauth2-proxy configuration is unsafe or incomplete. Check that
       oauth2_proxy_skip_auth_route still starts with '!', that the cookie
       secret decodes to 16, 24 or 32 bytes, and that client id and secret are
-      set in the vault, and extra JWT issuers contain an issuer=audience pair.
+      set, and that bearer authentication, if enabled, has an issuer=audience pair.
   tags: oauth2-proxy
 
 - name: "apply oauth2-proxy secret"
