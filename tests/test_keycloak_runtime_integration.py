@@ -391,13 +391,19 @@ def verify_backup_restore(stack):
     executable.mkdir()
     kubectl = executable / "kubectl"
     kubectl.write_text("#!" + sys.executable + "\n" + """
-import json, os, subprocess, sys
+import base64, json, os, subprocess, sys
 args = sys.argv[1:]
 if args[0] == 'exec':
-    raise SystemExit(subprocess.call(['docker', 'exec', os.environ['TEST_DB'], *args[args.index('--') + 1:]]))
+    stdin_args = ['-i'] if '-i' in args else []
+    raise SystemExit(subprocess.call(['docker', 'exec', *stdin_args, os.environ['TEST_DB'],
+                                     *args[args.index('--') + 1:]]))
 if args[:2] == ['get', 'secret']:
-    print(json.dumps({'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': 'keycloak'},
-                      'data': {'admin_password': 'c3ludGhldGljLWJhY2t1cC1jcmVkZW50aWFs'}}))
+    fields = {'admin_username': os.environ['KC_BOOTSTRAP_ADMIN_USERNAME'],
+              'admin_password': os.environ['KC_BOOTSTRAP_ADMIN_PASSWORD'],
+              'database_password': os.environ['KC_DB_PASSWORD']}
+    print(json.dumps({'apiVersion': 'v1', 'kind': 'Secret',
+                      'metadata': {'name': 'keycloak', 'namespace': 'authentication'},
+                      'data': {key: base64.b64encode(value.encode()).decode() for key, value in fields.items()}}))
     raise SystemExit(0)
 raise SystemExit(2)
 """)
@@ -418,7 +424,7 @@ raise SystemExit(2)
         str(Path(sys.executable).parent / "ansible-playbook"), "-i", str(inventory),
         str(ROOT / "roles/keycloak/files/backup-playbook.yml"), "--extra-vars", "@" + str(variables),
     ], env={
-        **os.environ, "PATH": str(executable) + os.pathsep + os.environ["PATH"],
+        **stack["environment"], "PATH": str(executable) + os.pathsep + os.environ["PATH"],
         "TEST_DB": stack["database"], "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
         "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
     }, capture_output=True, text=True, timeout=90)
@@ -427,27 +433,50 @@ raise SystemExit(2)
     assert snapshot.stat().st_mode & 0o777 == 0o600
     with tarfile.open(snapshot) as archive:
         assert set(archive.getnames()) == {"database.dump", "credentials.yml"}
-        dump = archive.extractfile("database.dump").read()
-        assert dump.startswith(b"PGDMP")
-        assert yaml.safe_load(archive.extractfile("credentials.yml"))["kind"] == "Secret"
-    stack["docker"]("exec", stack["database"], "createdb", "-U", "keycloak", "restored")
-    restored = subprocess.run([
-        "docker", "exec", "-i", stack["database"], "pg_restore", "-U", "keycloak", "-d", "restored",
-    ], input=dump, capture_output=True, check=False, timeout=60)
-    assert restored.returncode == 0, restored.stderr.decode()
-    count = stack["docker"]("exec", stack["database"], "psql", "-U", "keycloak",
-                           "-d", "restored", "-Atc",
-                           "SELECT count(*) FROM user_entity WHERE username='tester'").stdout.strip()
-    assert count == "1"
+        assert archive.extractfile("database.dump").read(5) == b"PGDMP"
+        recovery_secret = yaml.safe_load(archive.extractfile("credentials.yml"))
+        assert recovery_secret["kind"] == "Secret"
 
-    # Restart the actual server on the restored data before the browser login.
-    # Keep the original database under a different name to distinguish the two.
+    # The new destination has an empty database and no application in Kubernetes.
+    # Keep the original data under a separate name to distinguish it from the restore.
     server = stack["name"] + "-server"
     stack["docker"]("stop", server)
-    for old, new in (("keycloak", "original"), ("restored", "keycloak")):
-        stack["docker"]("exec", stack["database"], "psql", "-v", "ON_ERROR_STOP=1",
-                        "-U", "keycloak", "-d", "postgres", "-c",
-                        f"ALTER DATABASE {old} RENAME TO {new}")
+    stack["docker"]("exec", stack["database"], "psql", "-v", "ON_ERROR_STOP=1",
+                    "-U", "keycloak", "-d", "postgres", "-c", "ALTER DATABASE keycloak RENAME TO original")
+    stack["docker"]("exec", stack["database"], "createdb", "-U", "keycloak", "keycloak")
+    state = directory / "recovery-kubernetes.json"
+    state.write_text(json.dumps({"Node//recovery": resource("Node", "recovery")}))
+    state.chmod(0o600)
+    variables.write_text(yaml.safe_dump({
+        "startup_keycloak_operator": True, "keycloak_namespace": "authentication",
+        "restore_db": True, "restore_media": False, "db_backup_file": str(snapshot),
+    }))
+
+    def restore():
+        return subprocess.run([
+            str(Path(sys.executable).parent / "ansible-playbook"), "-i", str(inventory),
+            str(ROOT / "roles/keycloak/files/restore-playbook.yml"), "--extra-vars", "@" + str(variables),
+            "--skip-tags", "keycloak-prepare-client",
+        ], cwd=directory, env={
+            **os.environ, "PATH": str(executable) + os.pathsep + os.environ["PATH"],
+            "TEST_DB": stack["database"], "TEST_KUBERNETES_STATE": str(state),
+            "ANSIBLE_ROLES_PATH": str(ROOT / "roles"),
+            "ANSIBLE_COLLECTIONS_PATH": str(directory / "collections"),
+            "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
+            "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
+        }, capture_output=True, text=True, timeout=90)
+
+    restored = restore()
+    assert restored.returncode == 0, restored.stdout + restored.stderr
+    recovered = json.loads(state.read_text())
+    assert recovered["Secret/authentication/keycloak"]["data"] == recovery_secret["data"]
+    assert "Deployment/authentication/keycloak" not in recovered
+
+    # The second invocation refuses the populated database before applying resources.
+    repeated = restore()
+    assert repeated.returncode != 0
+    assert "The target Keycloak database is not empty" in repeated.stdout
+    assert json.loads(state.read_text()) == recovered
     stack["docker"]("start", server)
 
     # Wait through the same HTTPS gateway that OAuth2 Proxy will use. The

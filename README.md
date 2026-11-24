@@ -27,7 +27,7 @@ application deployment reuses the server and never upgrades it implicitly.
 Authentication uses separate persistent storage and retained credentials.
 
 The [Keycloak role](roles/keycloak/README.md) covers installation, explicit
-owner updates, TLS, diagnostics and independent backups. The
+owner updates, TLS, diagnostics, backup and recovery. The
 [client role](roles/keycloak-client/README.md) reconciles the cluster owner's
 versioned realm and client declarations, including passkeys and session policy. The
 [OAuth2 Proxy role](roles/oauth2-proxy/README.md#keycloak) consumes the generated

@@ -1,14 +1,6 @@
 ---
-- name: Create the shared authentication namespace
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: "{{ keycloak_namespace }}"
-        labels:
-          startup.deploy/service: keycloak
+- name: Prepare the shared authentication namespace
+  ansible.builtin.import_tasks: namespace.yml
 
 - name: Read existing Keycloak credentials
   kubernetes.core.k8s_info:
@@ -57,19 +49,8 @@
   register: keycloak_credentials
   no_log: true
 
-- name: Deploy the independent persistent authentication database
-  ansible.builtin.include_role:
-    name: postgres
-  vars:
-    k8s_namespace: "{{ keycloak_namespace }}"
-    project_name: "{{ 'keycloak-' ~ keycloak_cluster_id[:12] if keycloak_cluster_id is defined else keycloak_namespace }}"
-    postgres_version: "{{ keycloak_database_version }}"
-    postgres_port: 5432
-    postgres_pv_name: "{{ keycloak_namespace }}-postgres"
-    postgres_data_path: "/srv/{{ keycloak_namespace }}/postgres"
-    postgres_storage_node: "{{ keycloak_database_storage_node }}"
-    postgres_admin_username: keycloak
-    postgres_admin_password: "{{ keycloak_credentials.resources[0].data.database_password | b64decode }}"
+- name: Prepare persistent authentication storage
+  ansible.builtin.import_tasks: database.yml
 
 - name: Prepare the authentication namespace certificate issuer
   ansible.builtin.include_role:

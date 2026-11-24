@@ -97,6 +97,32 @@ storage if sessions must survive. After losing those Secrets, rerun owner client
 provisioning against the restored database and redeploy each affected proxy to
 apply the new credentials. Users will need to sign in again.
 
+### Recover authentication on a fresh cluster
+
+Prepare the replacement cluster, then configure the owner project with the same
+Keycloak namespace and public hostname, and pin compatible Keycloak and PostgreSQL
+versions. Before the first Keycloak deploy, restore the matching snapshot from a
+trusted, decrypted local archive:
+
+```bash
+startup ansible restore --working-directory deployment --environment production \
+  --playbook roles/keycloak/files/restore-playbook.yml \
+  --backup-dir /private/keycloak-backup \
+  --db-file /private/keycloak-backup/startup-keycloak-backup-SNAPSHOT.tar.gz \
+  --no-restore-media --yes
+```
+
+The restore recreates the recovery Secret, provisions dedicated PostgreSQL storage
+and imports the database in one transaction. An existing Keycloak Deployment,
+populated database, conflicting Secret or orphaned authentication volume blocks
+recovery. Pause automatic application and Keycloak deployments for this target
+until the restore completes.
+
+After the restore succeeds, deploy the Keycloak service, restore application
+client Secrets or reconcile the owner's realm and client declarations, then
+redeploy the affected proxies as needed. Verify discovery and an actual login
+through each application before moving traffic to the restored service.
+
 `keycloak-client` creates the startup realm and a confidential client with exact
 callback URLs, PKCE S256 and direct password grants disabled. It preserves users
 when reapplied. An explicitly shared realm still gets a different client for each

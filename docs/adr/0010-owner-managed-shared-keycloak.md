@@ -31,7 +31,8 @@ the fixed public HTTPS origin only on the private ingress path. Both require
 production DNS, certificates and routing to be verified independently.
 
 The cluster owner backs up the authentication database and recovery credentials
-separately. Losing a Secret for existing storage requires recovery, not automatic
+separately. Restore uses the same archive to recover the Secret and transactionally
+import PostgreSQL before Keycloak is deployed on a fresh target. Losing a Secret for existing storage requires recovery, not automatic
 credential replacement. Keep the existing namespace and hostname during adoption;
 changing a namespace does not migrate data or users. Before retiring an owner
 project, transfer its operator settings and access to a successor. Cluster
