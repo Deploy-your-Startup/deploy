@@ -13,10 +13,14 @@ playbook and group_vars. Authentication has its own namespace, PostgreSQL volume
 and generated recovery Secret. Attached projects may reuse the installation but
 cannot create or upgrade it. Normal deployments preserve an existing server;
 an explicit owner deployment with `keycloak_upgrade: true` applies reviewed
-updates. Removing an application never uninstalls shared authentication.
+updates. Reuse still checks workload, recovery Secret and ingress certificate readiness. Removing an application never uninstalls shared authentication.
 
-Each startup uses a separate realm and confidential PKCE S256 client by default.
-The client role retains users, registration policy and persisted credentials.
+The cluster owner declares each startup's realm, confidential PKCE S256 client,
+and target namespace in versioned configuration. The owner alone runs the
+client role with the shared administrator credential. The startup's deployment
+consumes its own client Secret. Removing a declaration leaves resources in
+place for explicit retirement. The client role retains users, registration
+policy and persisted credentials.
 Only explicitly declared session and passkey settings are reconciled. Sharing a
 realm is an operator decision, with one owner for its declared realm policy.
 OAuth2 Proxy accepts the generated namespaced client Secret and an explicit

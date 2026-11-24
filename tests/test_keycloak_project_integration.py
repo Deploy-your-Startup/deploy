@@ -81,7 +81,8 @@ def project_cluster(tmp_path):
         "Namespace//cert-manager": resource("Namespace", "cert-manager"),
         "HelmChart/kube-system/cert-manager": resource("HelmChart", "cert-manager", "kube-system", spec={"version": "existing"}),
         "Deployment/cert-manager/cert-manager": resource("Deployment", "cert-manager", "cert-manager", status={"readyReplicas": 1}),
-        "Certificate/authentication/keycloak-tls": resource("Certificate", "keycloak-tls", "authentication"),
+        "Certificate/authentication/keycloak-tls": resource("Certificate", "keycloak-tls", "authentication",
+            status={"conditions": [{"type": "Ready", "status": "True"}]}),
     }
     for name in ("issuers.cert-manager.io", "gatewayclasses.gateway.networking.k8s.io",
                  "gateways.gateway.networking.k8s.io", "httproutes.gateway.networking.k8s.io"):
@@ -89,7 +90,7 @@ def project_cluster(tmp_path):
     state = tmp_path / "cluster.json"
     state.write_text(json.dumps(objects, sort_keys=True))
 
-    def deploy(*, managed=True, namespace="owner", tags=None, **settings):
+    def deploy(*, managed=True, namespace="owner", tags=None, role="keycloak", **settings):
         variables = {
             "project_name": namespace, "k8s_namespace": namespace,
             "startup_cluster_managed": managed,
@@ -108,7 +109,7 @@ def project_cluster(tmp_path):
             "hosts": "localhost", "connection": "local", "gather_facts": False,
             "vars": variables,
             "tasks": [
-                {"ansible.builtin.import_role": {"name": "keycloak"}, "tags": ["keycloak"]},
+                {"ansible.builtin.import_role": {"name": role}, "tags": [role]},
                 {"name": "Deploy application after shared authentication",
                  "kubernetes.core.k8s": {"state": "present", "definition": {
                      "apiVersion": "v1", "kind": "ConfigMap",
@@ -261,6 +262,68 @@ def test_recovery_secret_loss_never_reinitializes_existing_authentication(projec
     result = deploy(tags="keycloak", keycloak_upgrade=True)
     assert result.returncode != 0
     assert "Restore the Keycloak Secret" in result.stdout
+    assert state.read_bytes() == snapshot
+
+
+@pytest.mark.parametrize("failure,diagnostic", [
+    ("recovery", "Restore the Keycloak Secret"),
+    ("workload", "Shared Keycloak is unavailable"),
+    ("certificate", "The Keycloak certificate is missing or unready"),
+])
+def test_reusing_incomplete_installation_fails_without_writes(project_cluster, failure, diagnostic):
+    # GIVEN a failed first install left a Deployment in the cluster.
+    deploy, state = project_cluster
+    assert deploy(tags="keycloak", keycloak_tls_termination="ingress").returncode == 0
+    objects = json.loads(state.read_text())
+    if failure == "recovery":
+        del objects["Secret/authentication/keycloak"]
+    elif failure == "workload":
+        objects["Deployment/authentication/keycloak"]["status"] = {"readyReplicas": 0}
+    else:
+        del objects["Certificate/authentication/keycloak-tls"]
+    state.write_text(json.dumps(objects, sort_keys=True))
+    snapshot = state.read_bytes()
+
+    # WHEN the owner repeats the normal command without forcing an upgrade.
+    result = deploy(tags="keycloak", keycloak_tls_termination="ingress")
+
+    # THEN the deployment reports the incomplete installation without writes.
+    assert result.returncode != 0
+    assert diagnostic in result.stdout
+    assert state.read_bytes() == snapshot
+
+
+@pytest.mark.parametrize("managed,operator", [(False, True), (True, False)])
+def test_only_the_explicit_cluster_operator_can_provision_clients(project_cluster, managed, operator):
+    # GIVEN a project that lacks one of the two ownership conditions.
+    deploy, state = project_cluster
+    snapshot = state.read_bytes()
+
+    # WHEN it tries to run the actual provisioning role.
+    result = deploy(role="keycloak-client", tags="keycloak-client", managed=managed,
+                    startup_keycloak_operator=operator)
+
+    # THEN it is rejected before accessing authentication resources.
+    assert result.returncode != 0
+    assert "Configure realms and clients from the cluster owner project" in result.stdout
+    assert "Read shared Keycloak administrator" not in result.stdout
+    assert state.read_bytes() == snapshot
+
+
+def test_owner_rejects_a_client_declared_for_two_applications(project_cluster):
+    # GIVEN two namespaces would receive different secrets for the same client.
+    deploy, state = project_cluster
+    snapshot = state.read_bytes()
+    client = {"realm": "demo", "client_id": "demo", "origin": "https://demo.example.com"}
+
+    # WHEN the owner applies the declarations.
+    result = deploy(role="keycloak-client", tags="keycloak-client", startup_keycloak_operator=True,
+                    keycloak_clients=[{**client, "namespace": "one"}, {**client, "namespace": "two"}])
+
+    # THEN no shared credential is read and no application resource is changed.
+    assert result.returncode != 0
+    assert "Each realm and client ID pair must be assigned" in result.stdout
+    assert "Read shared Keycloak administrator" not in result.stdout
     assert state.read_bytes() == snapshot
 
 

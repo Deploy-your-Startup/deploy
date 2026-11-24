@@ -20,6 +20,8 @@ from ansible.template import Templar, trust_as_template
 import pytest
 import yaml
 
+from test_keycloak_project_integration import PROVIDER, resource
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -318,6 +320,69 @@ def test_invalid_session_policy_is_rejected_before_contacting_keycloak(tmp_path,
     assert "session" in result.stdout.lower()
 
 
+def provision_startups(stack, client_secrets):
+    directory = stack["temporary"]
+    modules = directory / "collections/ansible_collections/kubernetes/core/plugins/modules"
+    modules.mkdir(parents=True, exist_ok=True)
+    for name in ("k8s", "k8s_info"):
+        (modules / f"{name}.py").write_text(PROVIDER)
+
+    def encode(value):
+        return base64.b64encode(value.encode()).decode()
+
+    state = directory / "kubernetes.json"
+    if not state.exists():
+        port = int(stack["api"].rsplit(":", 1)[1])
+        resources = {
+            "Service/authentication/keycloak": resource(
+                "Service", "keycloak", "authentication",
+                spec={"clusterIP": "127.0.0.1", "ports": [{"port": port}]},
+            ),
+            "Secret/authentication/keycloak": resource(
+                "Secret", "keycloak", "authentication",
+                data={"admin_username": encode("startup-admin"), "admin_password": encode(stack["password"])},
+            ),
+        }
+        for realm, secret in client_secrets.items():
+            namespace = "app-" + realm
+            resources[f"Namespace//{namespace}"] = resource("Namespace", namespace)
+            resources[f"Secret/{namespace}/keycloak-client"] = {
+                "kind": "Secret",
+                "metadata": {"name": "keycloak-client", "namespace": namespace,
+                             "annotations": {"startup.deploy/realm": realm, "startup.deploy/client": realm}},
+                "data": {"OAUTH2_PROXY_CLIENT_SECRET": encode(secret)},
+            }
+        state.write_text(json.dumps(resources))
+        state.chmod(0o600)
+    playbook = directory / "provision.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {
+            "startup_cluster_managed": True,
+            "startup_keycloak_operator": True,
+            "k8s_namespace": "owner",
+            "keycloak_clients": [
+                {"namespace": "app-" + realm, "realm": realm, "client_id": realm,
+                 "origin": f"https://app.example.test:{stack['port']}"}
+                for realm in client_secrets
+            ],
+        },
+        "tasks": [{"ansible.builtin.import_role": {"name": "keycloak-client"}, "tags": ["keycloak-client"]}],
+    }]))
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
+         "--tags", "keycloak-client"],
+        cwd=directory, capture_output=True, text=True, timeout=90,
+        env={**os.environ, "ANSIBLE_ROLES_PATH": str(ROOT / "roles"),
+             "ANSIBLE_COLLECTIONS_PATH": str(directory / "collections"),
+             "ANSIBLE_PYTHON_INTERPRETER": sys.executable,
+             "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
+             "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
+             "TEST_KUBERNETES_STATE": str(state), "NO_PROXY": "127.0.0.1,localhost"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def verify_backup_restore(stack):
     """Run the shipped backup playbook; only Kubernetes discovery/exec is a boundary."""
     directory = stack["temporary"]
@@ -374,11 +439,22 @@ raise SystemExit(2)
                            "SELECT count(*) FROM user_entity WHERE username='tester'").stdout.strip()
     assert count == "1"
 
+    # Restart the actual server on the restored data before the browser login.
+    # Keep the original database under a different name to distinguish the two.
+    server = stack["name"] + "-server"
+    stack["docker"]("stop", server)
+    for old, new in (("keycloak", "original"), ("restored", "keycloak")):
+        stack["docker"]("exec", stack["database"], "psql", "-v", "ON_ERROR_STOP=1",
+                        "-U", "keycloak", "-d", "postgres", "-c",
+                        f"ALTER DATABASE {old} RENAME TO {new}")
+    stack["docker"]("start", server)
+
 
 def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack):
     # GIVEN a real fresh PostgreSQL-backed Keycloak in production mode.
     client_secret = secrets.token_urlsafe(36)
-    configure(stack, "first", client_secret)
+    client_secrets = {"first": client_secret, "second": secrets.token_urlsafe(36)}
+    provision_startups(stack, client_secrets)
     token = request(stack["api"] + "/realms/master/protocol/openid-connect/token", {
         "grant_type": "password", "client_id": "admin-cli",
         "username": "startup-admin", "password": stack["password"],
@@ -394,9 +470,8 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
         "emailVerified": True, "firstName": "Test", "lastName": "User",
         "credentials": [{"type": "password", "value": test_password, "temporary": False}],
     }, token)
-    # WHEN the role is rerun and another startup is registered.
-    configure(stack, "first", client_secret)
-    configure(stack, "second", secrets.token_urlsafe(36))
+    # WHEN the owner repeats the provisioning run for both startups.
+    provision_startups(stack, client_secrets)
     token = request(stack["api"] + "/realms/master/protocol/openid-connect/token", {
         "grant_type": "password", "client_id": "admin-cli",
         "username": "startup-admin", "password": stack["password"],

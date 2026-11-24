@@ -110,16 +110,3 @@
     wait_condition:
       type: Available
       status: "True"
-
-- name: Wait for the public certificate
-  kubernetes.core.k8s_info:
-    api_version: cert-manager.io/v1
-    kind: Certificate
-    namespace: "{{ keycloak_namespace }}"
-    name: keycloak-tls
-    wait: true
-    wait_timeout: "{{ keycloak_ready_timeout }}"
-    wait_condition:
-      type: Ready
-      status: "True"
-  when: keycloak_tls_termination == 'ingress'

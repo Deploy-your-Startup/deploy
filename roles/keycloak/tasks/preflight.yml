@@ -50,8 +50,8 @@
 - name: Report an existing shared installation left unchanged
   ansible.builtin.debug:
     msg: >-
-      Shared Keycloak already exists in {{ keycloak_namespace }}. Keeping its
-      version and configuration. To apply reviewed changes, the cluster owner
+      Shared Keycloak already exists in {{ keycloak_namespace }}. Checking it without changing its
+      version or configuration. To apply reviewed changes, the cluster owner
       sets keycloak_upgrade: true for an explicit keycloak deployment, then
       removes that setting. Application realm/client deployment is separate.
   when:

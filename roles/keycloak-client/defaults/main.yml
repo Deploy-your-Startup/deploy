@@ -1,5 +1,7 @@
 ---
 keycloak_namespace: authentication
+keycloak_clients: []
+keycloak_client_target_namespace: "{{ k8s_namespace }}"
 keycloak_realm: "{{ project_name }}"
 keycloak_client_id: "{{ project_name }}"
 keycloak_client_origin: "https://{{ base_domain }}"

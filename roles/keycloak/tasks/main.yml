@@ -13,3 +13,6 @@
 - name: Install or explicitly update shared Keycloak from the owner project
   ansible.builtin.include_tasks: install.yml
   when: not (keycloak_present | bool) or (keycloak_upgrade | bool)
+
+- name: Verify the shared installation after applying or reusing it
+  ansible.builtin.include_tasks: readiness.yml

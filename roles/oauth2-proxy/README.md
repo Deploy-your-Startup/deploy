@@ -100,7 +100,7 @@ oauth2_proxy_whitelist_domain: app.example.com
 
 The selected Secret must exist in the application's `k8s_namespace` and contain
 `OAUTH2_PROXY_CLIENT_ID`, `OAUTH2_PROXY_CLIENT_SECRET` and
-`OAUTH2_PROXY_COOKIE_SECRET`. Include the client role before this role. The proxy
+`OAUTH2_PROXY_COOKIE_SECRET`. Provision the client from the cluster owner project before deploying the proxy. The proxy
 reuses those values and censors secret reads, facts and writes. Leaving
 `oauth2_proxy_existing_secret` empty keeps the existing Vault-backed inputs.
 Both providers use PKCE S256. The issuer must match discovery exactly; Keycloak
