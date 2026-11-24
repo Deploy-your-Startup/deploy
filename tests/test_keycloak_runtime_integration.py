@@ -498,6 +498,7 @@ raise SystemExit(2)
             time.sleep(1)
     else:
         pytest.fail("The restored realm did not become discoverable through the HTTPS gateway")
+    return recovered["Secret/authentication/keycloak"]
 
 
 def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack):
@@ -535,7 +536,21 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
     assert request(stack["api"] + "/admin/realms/first/clients/" + clients[0]["id"] + "/client-secret", token=token)["value"] == client_secret
     assert clients[0]["directAccessGrantsEnabled"] is False
     assert clients[0]["attributes"]["pkce.code.challenge.method"] == "S256"
-    verify_backup_restore(stack)
+    recovered_secret = verify_backup_restore(stack)
+
+    # Recover an application namespace that lost its client and cookie Secret.
+    state = stack["temporary"] / "kubernetes.json"
+    objects = json.loads(state.read_text())
+    objects["Secret/authentication/keycloak"] = recovered_secret
+    del objects["Secret/app-first/keycloak-client"]
+    port = stack["docker"]("port", stack["name"] + "-server", "8080/tcp").stdout.strip().rsplit(":", 1)[1]
+    objects["Service/authentication/keycloak"]["spec"]["ports"][0]["port"] = int(port)
+    state.write_text(json.dumps(objects))
+    provision_startups(stack, client_secrets)
+    credentials = json.loads(state.read_text())["Secret/app-first/keycloak-client"]["data"]
+    recovered_client_secret = base64.b64decode(credentials["OAUTH2_PROXY_CLIENT_SECRET"]).decode()
+    assert recovered_client_secret != client_secret
+
     defaults = yaml.safe_load((ROOT / "roles/oauth2-proxy/defaults/main.yml").read_text())
     values = {
         **defaults, "base_domain": "app.example.test", "k8s_namespace": "first",
@@ -550,8 +565,8 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
     }
     proxy = render("roles/oauth2-proxy/templates/deployment.yml", values)["spec"]["template"]["spec"]["containers"][0]
     stack["environment"].update(
-        OAUTH2_PROXY_CLIENT_ID="first", OAUTH2_PROXY_CLIENT_SECRET=client_secret,
-        OAUTH2_PROXY_COOKIE_SECRET=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
+        OAUTH2_PROXY_CLIENT_ID="first", OAUTH2_PROXY_CLIENT_SECRET=recovered_client_secret,
+        OAUTH2_PROXY_COOKIE_SECRET=base64.b64decode(credentials["OAUTH2_PROXY_COOKIE_SECRET"]).decode(),
     )
     container = stack["name"] + "-proxy"
     stack["docker"]("run", "-d", "--name", container, "--network", stack["name"],
