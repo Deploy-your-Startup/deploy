@@ -13,14 +13,11 @@ playbook and group_vars. Authentication has its own namespace, PostgreSQL volume
 and generated recovery Secret. Attached projects may reuse the installation but
 cannot create or upgrade it. Normal deployments preserve an existing server;
 an explicit owner deployment with `keycloak_upgrade: true` applies reviewed
-updates. Reuse still checks workload, recovery Secret and ingress certificate readiness. Removing an application never uninstalls shared authentication.
+updates. Reuse still checks workload, recovery Secret and ingress certificate
+readiness. Removing an application never uninstalls shared authentication.
 
-The cluster owner declares each startup's realm, confidential PKCE S256 client,
-and target namespace in versioned configuration. The owner alone runs the
-client role with the shared administrator credential. The startup's deployment
-consumes its own client Secret. Removing a declaration leaves resources in
-place for explicit retirement. The client role retains users, registration
-policy and persisted credentials.
+Each startup uses a separate realm and confidential PKCE S256 client by default.
+The client role retains users, registration policy and persisted credentials.
 Only explicitly declared session and passkey settings are reconciled. Sharing a
 realm is an operator decision, with one owner for its declared realm policy.
 OAuth2 Proxy accepts the generated namespaced client Secret and an explicit
@@ -32,9 +29,10 @@ production DNS, certificates and routing to be verified independently.
 
 The cluster owner backs up the authentication database and recovery credentials
 separately. Restore uses the same archive to recover the Secret and transactionally
-import PostgreSQL before Keycloak is deployed on a fresh target. Losing a Secret for existing storage requires recovery, not automatic
-credential replacement. Keep the existing namespace and hostname during adoption;
-changing a namespace does not migrate data or users. Before retiring an owner
+import PostgreSQL before Keycloak is deployed on a fresh target. Losing a Secret
+for existing storage requires recovery, not automatic credential replacement.
+Keep the existing namespace and hostname during adoption; changing a namespace
+does not migrate data or users. Before retiring an owner
 project, transfer its operator settings and access to a successor. Cluster
 removal requires an explicit decision to migrate, stop or delete identity data.
 

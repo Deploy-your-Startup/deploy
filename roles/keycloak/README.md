@@ -77,7 +77,7 @@ update a project until it adopts a release.
 The `keycloak` Secret in `authentication` contains the initial administrator
 credentials and database password. Keep it in the cluster's encrypted backups.
 Create a personal administrator in Keycloak for day-to-day use. The automation
-administrator is used by the owner's client provisioning role; deleting it requires deliberately
+administrator is used by the client role; deleting it requires deliberately
 updating that automation credential too. Never print it in CI logs.
 
 Back up authentication separately from the application using the existing CLI:
@@ -93,9 +93,9 @@ custom-format dump and its recovery Secret with private filesystem permissions.
 Encrypt the archive in off-server backup storage and preserve Vault recovery
 material. The normal application backup does not include this separate database.
 Also preserve each application's `keycloak-client` Secret in encrypted backup
-storage if sessions must survive. After losing those Secrets, rerun owner client
-provisioning against the restored database and redeploy each affected proxy to
-apply the new credentials. Users will need to sign in again.
+storage if sessions must survive. After losing those Secrets, redeploy each
+affected startup with `keycloak-client` before OAuth2 Proxy to apply the new
+credentials. Users will need to sign in again.
 
 ### Recover authentication on a fresh cluster
 
@@ -118,17 +118,16 @@ populated database, conflicting Secret or orphaned authentication volume blocks
 recovery. Pause automatic application and Keycloak deployments for this target
 until the restore completes.
 
-After the restore succeeds, deploy the Keycloak service, restore application
-client Secrets or reconcile the owner's realm and client declarations, then
-redeploy the affected proxies as needed. Verify discovery and an actual login
-through each application before moving traffic to the restored service.
+After the restore succeeds, deploy the Keycloak service. Restore backed-up
+application client Secrets where available and redeploy each affected startup so
+its client and proxy are configured against the restored Keycloak. Verify
+discovery and an actual login through each application before moving traffic.
 
 `keycloak-client` creates the startup realm and a confidential client with exact
 callback URLs, PKCE S256 and direct password grants disabled. It preserves users
 when reapplied. An explicitly shared realm still gets a different client for each
 startup. Existing credential-to-realm bindings cannot be silently reassigned.
-The owner reconciles [realm declarations](../keycloak-client/README.md) and
-application deploys consume their own client credentials.
+Startup deploys configure clients, not the shared server.
 
 New realms start with self-registration disabled. Manage this setting in the
 Keycloak administration console: select the startup realm, then **Realm settings
@@ -141,12 +140,13 @@ application-specific admission remains a separate authorization decision.
 
 ### Declarative session policy
 
-Set `session_settings` on a client declaration in the owner's
-`deployment/group_vars/all.yml` to manage selected realm settings. Values are seconds. For seven days without activity and
+Set `keycloak_realm_session_settings` in the startup's
+`deployment/group_vars/all.yml` to manage selected realm settings on every
+application deployment. Values are seconds. For seven days without activity and
 a thirty-day maximum:
 
 ```yaml
-session_settings:
+keycloak_realm_session_settings:
   ssoSessionIdleTimeout: 604800
   ssoSessionMaxLifespan: 2592000
   clientSessionIdleTimeout: 0
@@ -160,8 +160,8 @@ fields are the supported keys. Unspecified fields remain operator-managed;
 the default empty mapping preserves all session settings. Declared values take
 precedence over subsequent admin-console edits when the startup is deployed.
 Registration, users and other realm settings are not part of this update.
-If several startups deliberately share one realm, declare its session policy
-on one client and leave the mapping empty on the others.
+If several startups deliberately share one realm, give its session policy one
+deployment owner and leave this mapping empty in the others.
 
 Align OAuth2 Proxy's existing `oauth2_proxy_extra_args` with the policy, retaining
 any other application arguments: `--cookie-expire=168h` persists the browser

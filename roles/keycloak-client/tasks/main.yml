@@ -1,43 +1,6 @@
 ---
-- name: Require explicit authorization from the cluster owner
-  ansible.builtin.assert:
-    that:
-      - startup_cluster_managed | default(true) | bool
-      - startup_keycloak_operator | default(false) | bool
-    fail_msg: Configure realms and clients from the cluster owner project with startup_keycloak_operator enabled.
-
-- name: Require a nonempty list of client declarations
-  ansible.builtin.assert:
-    that:
-      - keycloak_clients | type_debug == 'list'
-      - keycloak_clients | length > 0
-
-- name: Validate required client declaration fields
-  ansible.builtin.assert:
-    that:
-      - keycloak_client is mapping
-      - keycloak_client.namespace is defined
-      - keycloak_client.realm is defined
-      - keycloak_client.client_id is defined
-      - keycloak_client.origin is defined
-  loop: "{{ keycloak_clients }}"
-  loop_control:
-    loop_var: keycloak_client
-
-- name: Require one client declaration per application namespace
-  ansible.builtin.assert:
-    that:
-      - (keycloak_clients | map(attribute='namespace') | unique | length) == (keycloak_clients | length)
-
-- name: Reject duplicate clients in the same realm
-  ansible.builtin.assert:
-    that:
-      - (keycloak_client_pairs | unique(case_sensitive=true) | length) == (keycloak_clients | length)
-    fail_msg: Each realm and client ID pair must be assigned to a single application namespace.
-  vars:
-    keycloak_client_pairs: >-
-      {{ keycloak_clients | map(attribute='realm') |
-         zip(keycloak_clients | map(attribute='client_id')) | map('join', '/') | list }}
+- name: Validate the startup identity configuration
+  ansible.builtin.import_tasks: preflight.yml
 
 - name: Read shared Keycloak administrator credentials
   kubernetes.core.k8s_info:
@@ -61,16 +24,50 @@
       - keycloak_client_service.resources | length == 1
     fail_msg: Run startup ansible deploy --service keycloak from the cluster owner project before binding startups.
 
-- name: Provision each declared realm and client
-  ansible.builtin.include_tasks: provision.yml
-  loop: "{{ keycloak_clients }}"
-  loop_control:
-    loop_var: keycloak_client
-    label: "{{ keycloak_client.namespace }}"
-  vars:
-    keycloak_client_target_namespace: "{{ keycloak_client.namespace }}"
-    keycloak_realm: "{{ keycloak_client.realm }}"
-    keycloak_client_id: "{{ keycloak_client.client_id }}"
-    keycloak_client_origin: "{{ keycloak_client.origin }}"
-    keycloak_realm_session_settings: "{{ keycloak_client.session_settings | default({}) }}"
-    keycloak_realm_passkeys_enabled: "{{ keycloak_client.passkeys_enabled | default(none) }}"
+- name: Read the startup client credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ k8s_namespace }}"
+    name: "{{ keycloak_client_secret_name }}"
+  register: keycloak_client_existing
+  no_log: true
+
+- name: Refuse to silently move existing credentials to another realm or client
+  ansible.builtin.assert:
+    that:
+      - keycloak_client_existing.resources[0].metadata.annotations['startup.deploy/realm'] == keycloak_realm
+      - keycloak_client_existing.resources[0].metadata.annotations['startup.deploy/client'] == keycloak_client_id
+  when: keycloak_client_existing.resources | length > 0
+
+- name: Persist the startup credentials on first use
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ keycloak_client_secret_name }}"
+        namespace: "{{ k8s_namespace }}"
+        annotations:
+          startup.deploy/realm: "{{ keycloak_realm }}"
+          startup.deploy/client: "{{ keycloak_client_id }}"
+      type: Opaque
+      stringData:
+        OAUTH2_PROXY_CLIENT_ID: "{{ keycloak_client_id }}"
+        OAUTH2_PROXY_CLIENT_SECRET: "{{ lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}"
+        OAUTH2_PROXY_COOKIE_SECRET: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}"
+  when: keycloak_client_existing.resources | length == 0
+  no_log: true
+  diff: false
+
+- name: Read the persisted startup credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ k8s_namespace }}"
+    name: "{{ keycloak_client_secret_name }}"
+  register: keycloak_client_credentials
+  no_log: true
+
+- name: Configure the startup realm and client
+  ansible.builtin.include_tasks: configure.yml
+  no_log: true

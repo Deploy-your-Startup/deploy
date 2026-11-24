@@ -356,20 +356,20 @@ def provision_startups(stack, client_secrets):
         state.write_text(json.dumps(resources))
         state.chmod(0o600)
     playbook = directory / "provision.yml"
-    playbook.write_text(yaml.safe_dump([{
-        "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "vars": {
-            "startup_cluster_managed": True,
-            "startup_keycloak_operator": True,
-            "k8s_namespace": "owner",
-            "keycloak_clients": [
-                {"namespace": "app-" + realm, "realm": realm, "client_id": realm,
-                 "origin": f"https://app.example.test:{stack['port']}"}
-                for realm in client_secrets
-            ],
-        },
-        "tasks": [{"ansible.builtin.import_role": {"name": "keycloak-client"}, "tags": ["keycloak-client"]}],
-    }]))
+    playbook.write_text(yaml.safe_dump([
+        {
+            "name": f"Deploy startup {realm}",
+            "hosts": "localhost", "connection": "local", "gather_facts": False,
+            "vars": {
+                "startup_cluster_managed": False,
+                "project_name": realm,
+                "k8s_namespace": "app-" + realm,
+                "keycloak_client_origin": f"https://app.example.test:{stack['port']}",
+            },
+            "tasks": [{"ansible.builtin.import_role": {"name": "keycloak-client"}, "tags": ["keycloak-client"]}],
+        }
+        for realm in client_secrets
+    ]))
     result = subprocess.run(
         [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
          "--tags", "keycloak-client"],
@@ -521,7 +521,7 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
         "emailVerified": True, "firstName": "Test", "lastName": "User",
         "credentials": [{"type": "password", "value": test_password, "temporary": False}],
     }, token)
-    # WHEN the owner repeats the provisioning run for both startups.
+    # WHEN each attached startup repeats its own provisioning run.
     provision_startups(stack, client_secrets)
     token = request(stack["api"] + "/realms/master/protocol/openid-connect/token", {
         "grant_type": "password", "client_id": "admin-cli",
@@ -546,7 +546,7 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
     port = stack["docker"]("port", stack["name"] + "-server", "8080/tcp").stdout.strip().rsplit(":", 1)[1]
     objects["Service/authentication/keycloak"]["spec"]["ports"][0]["port"] = int(port)
     state.write_text(json.dumps(objects))
-    provision_startups(stack, client_secrets)
+    provision_startups(stack, {"first": client_secret})
     credentials = json.loads(state.read_text())["Secret/app-first/keycloak-client"]["data"]
     recovered_client_secret = base64.b64decode(credentials["OAUTH2_PROXY_CLIENT_SECRET"]).decode()
     assert recovered_client_secret != client_secret

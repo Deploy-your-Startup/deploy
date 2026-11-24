@@ -1,47 +1,33 @@
-# Keycloak realm and client provisioning
+# Keycloak client and realm configuration
 
-Declare realms and clients in the cluster owner's project. The owner deploys
-the bindings after shared Keycloak is ready and the target application
-namespaces exist. Add this to the owner service play after the `keycloak` role:
-
-```yaml
-- name: Provision declared startup authentication
-  import_role:
-    name: keycloak-client
-  when: (auth_provider | default('')) == 'keycloak'
-  tags: [never, keycloak-client]
-```
-
-Keep the owner service configuration and `startup_keycloak_operator: true` in
-the owner's `deployment/group_vars/all.yml`, together with the declarations:
+Bind a startup to an existing Keycloak service and administrator recovery Secret
+named `keycloak` in `keycloak_namespace` (default `authentication`). This role
+does not install or upgrade the shared server. Tested with Keycloak 26.8.1;
+the integrated passkey login forms require a compatible Keycloak version and
+the standard browser authentication flow.
 
 ```yaml
-keycloak_clients:
-  - namespace: example-startup
-    realm: example-startup
-    client_id: example-startup
-    origin: https://app.example.com
-    passkeys_enabled: true
+project_name: example-startup
+k8s_namespace: example-startup
+base_domain: app.example.com
+keycloak_realm: example-startup
+keycloak_client_id: example-startup
+keycloak_realm_passkeys_enabled: true
 ```
 
-Apply with `startup ansible deploy --working-directory deployment --environment
-production --service keycloak-client` from the owner project. The role uses the
-shared administrator Secret and writes a `keycloak-client` Secret into each
-declared application namespace. Each app's deployment reads its own Secret via
-[OAuth2 Proxy](../oauth2-proxy/README.md#keycloak). It can keep its existing login
-until the new integration is ready.
-
-Use one client per namespace and a unique client ID within each realm. New
-realms start with registration closed. Clients are confidential, require S256
-PKCE, and use the exact callback `<origin>/oauth2/callback`. Reapplying the role
-preserves existing users and secrets. Removing a declaration leaves the
-existing realm, client, and credentials in place for explicit retirement.
-The authentication namespace and master realm are reserved.
+Include `keycloak-client` in the project's playbook after the shared service
+exists. It creates a realm with registration closed only when absent, preserves
+its users and existing startup client credentials, and configures a confidential
+OIDC client with PKCE S256 and the callback `https://<base_domain>/oauth2/callback`.
+OAuth2 Proxy can reuse the resulting `keycloak-client` Secret.
+The application namespace must differ from the authentication namespace; the
+master realm cannot be managed as a startup realm.
 
 ## Passkeys
 
-Set `passkeys_enabled` on a client declaration. Its default is `null`, which
-leaves the realm's passkey policy and registration action under operator control.
+`keycloak_realm_passkeys_enabled` is an Ansible variable, not a Keycloak container
+environment variable. Its default is `null`, which leaves the realm's passkey
+policy and registration action under operator control.
 
 - `true` enables integrated passkey login, discoverable credentials and required
   user verification. It enables `webauthn-register-passwordless` without changing
@@ -66,7 +52,7 @@ password fallback and passkey login on the target browsers before rollout.
 
 ## Session policy
 
-`session_settings` defaults to `{}`. Only explicitly declared
+`keycloak_realm_session_settings` defaults to `{}`. Only explicitly declared
 session durations are managed. Supported fields (seconds) are
 `ssoSessionIdleTimeout`, `ssoSessionMaxLifespan`, `clientSessionIdleTimeout`,
 `clientSessionMaxLifespan`, `ssoSessionIdleTimeoutRememberMe`, and

@@ -6,8 +6,7 @@
       - keycloak_realm != 'master'
       - keycloak_client_id is match('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
       - keycloak_client_origin is match('^https://[a-zA-Z0-9.-]+(?::[0-9]+)?$')
-      - (keycloak_client_target_namespace | default(k8s_namespace)) is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
-      - (keycloak_client_target_namespace | default(k8s_namespace)) != keycloak_namespace
+      - k8s_namespace != keycloak_namespace
 
 - name: Validate the managed realm session settings
   ansible.builtin.assert:
