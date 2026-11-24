@@ -6,6 +6,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -448,6 +449,26 @@ raise SystemExit(2)
                         "-U", "keycloak", "-d", "postgres", "-c",
                         f"ALTER DATABASE {old} RENAME TO {new}")
     stack["docker"]("start", server)
+
+    # Wait through the same HTTPS gateway that OAuth2 Proxy will use. The
+    # test certificate is trusted here; the loopback address is only for DNS.
+    port = stack["port"]
+    tls = ssl.create_default_context(cafile=str(directory / "cert.pem"))
+    tls.check_hostname = False
+    gateway = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                           urllib.request.HTTPSHandler(context=tls))
+    discovery = "/realms/first/.well-known/openid-configuration"
+    probe = urllib.request.Request(f"https://127.0.0.1:{port}{discovery}",
+                                   headers={"Host": f"auth.example.test:{port}"})
+    for _ in range(60):
+        try:
+            with gateway.open(probe, timeout=2) as response:
+                assert json.load(response)["issuer"] == f"https://auth.example.test:{port}/realms/first"
+            break
+        except (OSError, urllib.error.URLError):
+            time.sleep(1)
+    else:
+        pytest.fail("The restored realm did not become discoverable through the HTTPS gateway")
 
 
 def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack):
