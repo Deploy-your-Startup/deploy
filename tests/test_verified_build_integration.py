@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from urllib.parse import parse_qs, urlsplit
 import zipfile
 
 import pytest
@@ -76,7 +77,8 @@ def github(tmp_path):
                 self.send_error(403)
                 return
             if path.startswith('actions/artifacts?'):
-                value = {'artifacts': list(artifacts.values())}
+                names = parse_qs(urlsplit(path).query).get('name', [])
+                value = {'artifacts': [item for item in artifacts.values() if item['name'] in names]}
             elif path == 'actions/runs/100/artifacts?per_page=100':
                 value = {'artifacts': list(artifacts.values())}
             elif path.startswith('actions/artifacts/'):
@@ -356,7 +358,7 @@ def test_closed_pr_reuse_with_the_shipped_job_permissions(github, job, deny_pull
         assert result.returncode == 0, result.stderr
         assert values['reuse'] == ('false' if deny_pull_requests else 'true'), result.stdout
         if deny_pull_requests:
-            assert 'PR evidence rejected: HTTPError' in result.stdout
+            assert 'Evidence or GitHub metadata could not be read' in result.stdout
     elif deny_pull_requests:
         assert result.returncode != 0
         assert not (github['runtime'] / 'production-image.tar').exists()
