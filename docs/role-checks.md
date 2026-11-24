@@ -21,7 +21,7 @@ Set RESTORE_POSTGRES_IMAGE to another installed Postgres image for an
 additional compatibility check. These checks do not provision infrastructure or
 execute a deployment.
 
-The KPI browser checks also need the pinned Chromium shell once:
+The KPI and Keycloak browser checks also need the pinned Chromium shell once:
 
 ```sh
 uv sync --locked
@@ -31,8 +31,13 @@ uv run --locked playwright install --only-shell chromium
 `./make.sh test` runs independent scenarios in parallel pytest-xdist workers
 against one Docker daemon. After their teardown, it runs the three-server K3s
 encryption check and the KPI browser tests serially. This leaves Docker network
-capacity for K3s and gives Chromium a stable network during navigation. Either
-phase failing makes the command fail. Grouping only the KPI scenarios on one
+capacity for K3s and gives Chromium a stable network during navigation. Keycloak
+runtime and passkey scenarios also run in this serial phase. They exercise production-mode
+Keycloak/PostgreSQL, confidential clients, realm/session isolation, browser login,
+passkey enrollment/password fallback, and a real database backup/restore. The
+owner/attached-project tests separately run the shipped roles against a file-backed
+Kubernetes boundary. Keycloak image pulls require access to `quay.io`; the pinned
+Chromium build is downloaded from Playwright. Either phase failing makes the command fail. Grouping only the KPI scenarios on one
 worker is insufficient: other workers can still change the host network while
 Chromium is navigating. Give every container, image tag and Compose project a unique
 name, publish only on loopback ports Docker or the kernel just chose, and filter

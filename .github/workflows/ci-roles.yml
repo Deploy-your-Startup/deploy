@@ -28,7 +28,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-      - name: Install browser for KPI login E2E
+      - name: Install browser for KPI and Keycloak login E2E
         run: uv run --locked playwright install --with-deps --only-shell chromium
       - name: Validate role structure
         run: ./make.sh lint

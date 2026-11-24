@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: "{{ keycloak_namespace }}"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: keycloak
+          image: "quay.io/keycloak/keycloak:{{ keycloak_version }}"
+          args: ["start"]
+          env:
+            - {name: KC_DB, value: postgres}
+            - {name: KC_DB_URL_HOST, value: postgres}
+            - {name: KC_DB_URL_DATABASE, value: keycloak}
+            - {name: KC_DB_USERNAME, value: keycloak}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: keycloak, key: database_password}
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef: {name: keycloak, key: admin_username}
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: keycloak, key: admin_password}
+            - {name: KC_HOSTNAME, value: "https://{{ keycloak_hostname }}"}
+            - {name: KC_HTTP_ENABLED, value: "true"}
+            - {name: KC_PROXY_HEADERS, value: xforwarded}
+            - {name: KC_HEALTH_ENABLED, value: "true"}
+            - {name: KC_CACHE, value: local}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: management, containerPort: 9000}
+          startupProbe:
+            httpGet: {path: /health/started, port: management}
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health/ready, port: management}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health/live, port: management}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: "{{ keycloak_cpu_request }}", memory: "{{ keycloak_memory_request }}"}
+            limits: {cpu: "{{ keycloak_cpu_limit }}", memory: "{{ keycloak_memory_limit }}"}

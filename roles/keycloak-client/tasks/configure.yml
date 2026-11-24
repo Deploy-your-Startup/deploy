@@ -1,0 +1,103 @@
+---
+- name: Authenticate the cluster automation account
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      client_id: admin-cli
+      username: "{{ keycloak_client_admin.resources[0].data.admin_username | b64decode }}"
+      password: "{{ keycloak_client_admin.resources[0].data.admin_password | b64decode }}"
+    timeout: 60
+    return_content: true
+  register: keycloak_client_token
+  no_log: true
+  diff: false
+
+- name: Read the startup realm
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}"
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    status_code: [200, 404]
+    timeout: 60
+  register: keycloak_client_realm
+  no_log: true
+
+- name: Create a realm only when it does not exist
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    body_format: json
+    body:
+      realm: "{{ keycloak_realm }}"
+      enabled: true
+      registrationAllowed: false
+    status_code: [201, 409]
+    timeout: 60
+  when: keycloak_client_realm.status == 404
+  register: keycloak_client_realm_created
+  changed_when: keycloak_client_realm_created.status == 201
+  no_log: true
+  diff: false
+
+- name: Apply explicitly managed realm session settings
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    body_format: json
+    body: "{{ keycloak_realm_session_settings }}"
+    status_code: 204
+    timeout: 60
+  when:
+    - keycloak_realm_session_settings | default({}) | length > 0
+    - >-
+      keycloak_realm_session_settings !=
+      (keycloak_client_realm.json | default({}) | dict2items |
+       selectattr('key', 'in', keycloak_realm_session_settings) | items2dict)
+  changed_when: true
+  no_log: true
+  diff: false
+
+- name: Apply explicitly managed realm passkeys
+  ansible.builtin.include_tasks: passkeys.yml
+  when: keycloak_realm_passkeys_enabled | default(none) is not none
+
+- name: Configure the confidential OAuth2 Proxy client
+  community.general.keycloak_client:
+    auth_keycloak_url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}"
+    auth_realm: master
+    auth_username: "{{ keycloak_client_admin.resources[0].data.admin_username | b64decode }}"
+    auth_password: "{{ keycloak_client_admin.resources[0].data.admin_password | b64decode }}"
+    connection_timeout: 60
+    realm: "{{ keycloak_realm }}"
+    client_id: "{{ keycloak_client_id }}"
+    secret: "{{ keycloak_client_credentials.resources[0].data.OAUTH2_PROXY_CLIENT_SECRET | b64decode }}"
+    state: present
+    enabled: true
+    protocol: openid-connect
+    public_client: false
+    standard_flow_enabled: true
+    direct_access_grants_enabled: false
+    service_accounts_enabled: false
+    redirect_uris: ["{{ keycloak_client_origin }}/oauth2/callback"]
+    web_origins: ["{{ keycloak_client_origin }}"]
+    attributes:
+      pkce.code.challenge.method: S256
+      post.logout.redirect.uris: "{{ keycloak_client_origin }}/"
+    protocol_mappers:
+      - name: startup-audience
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        consentRequired: false
+        config:
+          included.client.audience: "{{ keycloak_client_id }}"
+          id.token.claim: "true"
+          access.token.claim: "true"
+  no_log: true
+  diff: false

@@ -1,0 +1,67 @@
+---
+- name: Read the realm passwordless policy
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}"
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    timeout: 60
+  register: keycloak_client_passkey_realm
+  no_log: true
+
+- name: Select the managed passwordless policy
+  ansible.builtin.set_fact:
+    keycloak_client_passkey_policy: >-
+      {{ {'webAuthnPolicyPasswordlessPasskeysEnabled': keycloak_realm_passkeys_enabled} |
+         combine({'webAuthnPolicyPasswordlessResidentKey': 'required',
+                  'webAuthnPolicyPasswordlessUserVerificationRequirement': 'required'}
+                 if keycloak_realm_passkeys_enabled else {}) }}
+
+- name: Apply the managed passwordless policy
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    body_format: json
+    # Keycloak updates the policy as a whole; retain the RP identity and all
+    # operator-owned policy fields when changing the declared subset.
+    body: >-
+      {{ (keycloak_client_passkey_realm.json | dict2items |
+          selectattr('key', 'match', '^webAuthnPolicyPasswordless') | items2dict) |
+         combine(keycloak_client_passkey_policy) }}
+    status_code: 204
+    timeout: 60
+  when: >-
+    keycloak_client_passkey_policy !=
+    (keycloak_client_passkey_realm.json | dict2items |
+     selectattr('key', 'in', keycloak_client_passkey_policy) | items2dict)
+  changed_when: true
+  no_log: true
+  diff: false
+
+- name: Read the passwordless registration action
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}/authentication/required-actions/webauthn-register-passwordless"
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    timeout: 60
+  when: keycloak_realm_passkeys_enabled
+  register: keycloak_client_passkey_registration
+  no_log: true
+
+- name: Allow users to register a passkey without forcing enrollment
+  ansible.builtin.uri:
+    url: "http://{{ keycloak_client_service.resources[0].spec.clusterIP }}:{{ keycloak_client_service.resources[0].spec.ports[0].port }}/admin/realms/{{ keycloak_realm }}/authentication/required-actions/webauthn-register-passwordless"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ keycloak_client_token.json.access_token }}"
+    body_format: json
+    body: "{{ keycloak_client_passkey_registration.json | combine({'enabled': true}) }}"
+    status_code: 204
+    timeout: 60
+  when:
+    - keycloak_realm_passkeys_enabled
+    - not keycloak_client_passkey_registration.json.enabled
+  changed_when: true
+  no_log: true
+  diff: false

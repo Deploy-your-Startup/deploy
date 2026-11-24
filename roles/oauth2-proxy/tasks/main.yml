@@ -2,6 +2,25 @@
 # silent authentication bypass rather than a broken deployment. These checks
 # run before anything is applied. None of them echo a secret - only lengths and
 # booleans derived from one.
+- name: Read an explicitly selected Kubernetes credential Secret
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ k8s_namespace | default('default') }}"
+    name: "{{ oauth2_proxy_existing_secret }}"
+  register: oauth2_proxy_cluster_credentials
+  when: oauth2_proxy_existing_secret | length > 0
+  no_log: true
+  tags: oauth2-proxy
+
+- name: Use the selected provider credentials
+  ansible.builtin.set_fact:
+    oauth2_proxy_client_id: "{{ oauth2_proxy_cluster_credentials.resources[0].data.OAUTH2_PROXY_CLIENT_ID | b64decode }}"
+    oauth2_proxy_client_secret: "{{ oauth2_proxy_cluster_credentials.resources[0].data.OAUTH2_PROXY_CLIENT_SECRET | b64decode }}"
+    oauth2_proxy_cookie_secret: "{{ oauth2_proxy_cluster_credentials.resources[0].data.OAUTH2_PROXY_COOKIE_SECRET | b64decode }}"
+  when: oauth2_proxy_existing_secret | length > 0
+  no_log: true
+  tags: oauth2-proxy
+
 - name: "assert oauth2-proxy is configured safely"
   ansible.builtin.assert:
     that:

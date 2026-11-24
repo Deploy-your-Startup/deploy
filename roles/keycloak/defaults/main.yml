@@ -1,0 +1,16 @@
+---
+keycloak_version: "26.8.1"
+keycloak_namespace: authentication
+keycloak_hostname: ""
+keycloak_tls_termination: ingress
+keycloak_ready_timeout: 600
+keycloak_admin_username: startup-admin
+keycloak_memory_request: 512Mi
+keycloak_memory_limit: 1536Mi
+keycloak_cpu_request: 250m
+keycloak_cpu_limit: "2"
+
+# Existing shared installations change only during an explicit owner update.
+keycloak_upgrade: false
+keycloak_database_version: "18.6"
+keycloak_database_storage_node: ""

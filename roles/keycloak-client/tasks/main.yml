@@ -1,0 +1,73 @@
+---
+- name: Validate the startup identity configuration
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Read shared Keycloak administrator credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_client_admin
+  no_log: true
+
+- name: Read the shared Keycloak service
+  kubernetes.core.k8s_info:
+    kind: Service
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_client_service
+
+- name: Require the shared service before binding a startup
+  ansible.builtin.assert:
+    that:
+      - keycloak_client_admin.resources | length == 1
+      - keycloak_client_service.resources | length == 1
+    fail_msg: Run startup ansible deploy --service keycloak from the cluster owner project before binding startups.
+
+- name: Read the startup client credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ k8s_namespace }}"
+    name: "{{ keycloak_client_secret_name }}"
+  register: keycloak_client_existing
+  no_log: true
+
+- name: Refuse to silently move existing credentials to another realm or client
+  ansible.builtin.assert:
+    that:
+      - keycloak_client_existing.resources[0].metadata.annotations['startup.deploy/realm'] == keycloak_realm
+      - keycloak_client_existing.resources[0].metadata.annotations['startup.deploy/client'] == keycloak_client_id
+  when: keycloak_client_existing.resources | length > 0
+
+- name: Persist the startup credentials on first use
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ keycloak_client_secret_name }}"
+        namespace: "{{ k8s_namespace }}"
+        annotations:
+          startup.deploy/realm: "{{ keycloak_realm }}"
+          startup.deploy/client: "{{ keycloak_client_id }}"
+      type: Opaque
+      stringData:
+        OAUTH2_PROXY_CLIENT_ID: "{{ keycloak_client_id }}"
+        OAUTH2_PROXY_CLIENT_SECRET: "{{ lookup('ansible.builtin.password', '/dev/null', length=48, chars=['ascii_letters', 'digits']) }}"
+        OAUTH2_PROXY_COOKIE_SECRET: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}"
+  when: keycloak_client_existing.resources | length == 0
+  no_log: true
+  diff: false
+
+- name: Read the persisted startup credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ k8s_namespace }}"
+    name: "{{ keycloak_client_secret_name }}"
+  register: keycloak_client_credentials
+  no_log: true
+
+- name: Configure the startup realm and client
+  ansible.builtin.include_tasks: configure.yml
+  no_log: true

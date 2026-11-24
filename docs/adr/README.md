@@ -15,3 +15,4 @@ records from 0100. Supersede a record with a new one instead of rewriting it.
 | [0007](0007-releases-are-self-contained.md) | Each release is immutable and its references name its own tag |
 | [0008](0008-workflow-organization-and-deployment-lock.md) | Remove the legacy alias and share a protected environment deployment lock |
 | [0009](0009-one-project-deployment-version.md) | One native project reference configures local and CI deployment |
+| [0010](0010-owner-managed-shared-keycloak.md) | The cluster owner manages persistent shared authentication; startups own their realms |

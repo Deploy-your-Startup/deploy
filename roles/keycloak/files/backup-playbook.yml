@@ -1,0 +1,58 @@
+---
+- name: Back up shared authentication independently of application data
+  hosts: "{{ keycloak_inventory_group | default('hcloud_type_master') }}:&hcloud_type_master"
+  gather_facts: false
+  run_once: true
+  tasks:
+    - name: Require the Keycloak owner project
+      ansible.builtin.assert:
+        that:
+          - startup_keycloak_operator | default(false) | bool
+          - startup_cluster_managed | default(true) | bool
+          - keycloak_namespace is match('^[a-z][a-z0-9-]{0,62}$')
+    - name: Create a private temporary snapshot directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: startup-keycloak-backup-
+      register: keycloak_snapshot
+    - name: Export and download the authentication snapshot
+      block:
+        - name: Dump PostgreSQL and the matching recovery credentials
+          ansible.builtin.shell: |
+            set -euo pipefail
+            umask 077
+            kubectl exec -n "{{ keycloak_namespace }}" deploy/postgres -- \
+              sh -c 'pg_dump -U "$POSTGRES_USER" -d keycloak --format=custom' \
+              > "{{ keycloak_snapshot.path }}/database.dump"
+            kubectl get secret keycloak -n "{{ keycloak_namespace }}" -o yaml \
+              > "{{ keycloak_snapshot.path }}/credentials.yml"
+            test -s "{{ keycloak_snapshot.path }}/database.dump"
+            tar -C "{{ keycloak_snapshot.path }}" -czf "{{ keycloak_snapshot.path }}/snapshot.tar.gz" \
+              database.dump credentials.yml
+          args:
+            executable: /bin/bash
+          no_log: true
+        - name: Create the private local backup directory
+          ansible.builtin.file:
+            path: "{{ local_backup_root }}"
+            state: directory
+            mode: "0700"
+          delegate_to: localhost
+          become: false
+        - name: Download the authentication snapshot
+          ansible.builtin.fetch:
+            src: "{{ keycloak_snapshot.path }}/snapshot.tar.gz"
+            dest: "{{ local_backup_root }}/{{ keycloak_snapshot.path | basename }}.tar.gz"
+            flat: true
+          no_log: true
+        - name: Restrict snapshot file permissions
+          ansible.builtin.file:
+            path: "{{ local_backup_root }}/{{ keycloak_snapshot.path | basename }}.tar.gz"
+            mode: "0600"
+          delegate_to: localhost
+          become: false
+      always:
+        - name: Remove this run's temporary server files
+          ansible.builtin.file:
+            path: "{{ keycloak_snapshot.path }}"
+            state: absent

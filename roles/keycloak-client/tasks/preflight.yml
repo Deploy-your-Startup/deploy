@@ -1,0 +1,35 @@
+---
+- name: Validate the startup authentication boundary
+  ansible.builtin.assert:
+    that:
+      - keycloak_realm is match('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
+      - keycloak_realm != 'master'
+      - keycloak_client_id is match('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
+      - keycloak_client_origin is match('^https://[a-zA-Z0-9.-]+(?::[0-9]+)?$')
+      - k8s_namespace != keycloak_namespace
+
+- name: Validate the managed realm session settings
+  ansible.builtin.assert:
+    that:
+      - keycloak_realm_session_settings | default({}) is mapping
+      - >-
+        keycloak_realm_session_settings | default({}) | list |
+        difference(['ssoSessionIdleTimeout', 'ssoSessionMaxLifespan',
+                    'clientSessionIdleTimeout', 'clientSessionMaxLifespan',
+                    'ssoSessionIdleTimeoutRememberMe', 'ssoSessionMaxLifespanRememberMe']) | length == 0
+    fail_msg: keycloak_realm_session_settings accepts only documented session timeout fields.
+
+- name: Require integer session durations in seconds
+  ansible.builtin.assert:
+    that:
+      - item.value is integer
+      - item.value >= 0
+      - item.key not in ['ssoSessionIdleTimeout', 'ssoSessionMaxLifespan'] or item.value > 0
+    fail_msg: Session durations must be nonnegative integers; SSO idle and maximum must be positive.
+  loop: "{{ keycloak_realm_session_settings | default({}) | dict2items }}"
+
+- name: Validate optional realm passkey management
+  ansible.builtin.assert:
+    that:
+      - keycloak_realm_passkeys_enabled | default(none) is none or keycloak_realm_passkeys_enabled is boolean
+    fail_msg: keycloak_realm_passkeys_enabled must be null, true or false.

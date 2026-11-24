@@ -1,0 +1,59 @@
+---
+- name: Validate the shared Keycloak configuration
+  ansible.builtin.assert:
+    that:
+      - keycloak_hostname is match('^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$')
+      - "'.' in keycloak_hostname"
+      - keycloak_namespace is match('^[a-z][a-z0-9-]{0,62}$')
+      - keycloak_tls_termination in ['ingress', 'external_proxy']
+      - keycloak_namespace != (k8s_namespace | default('default'))
+    fail_msg: Keycloak requires its own namespace and a public authentication hostname.
+
+- name: Read existing ingress ownership of the authentication hostname
+  kubernetes.core.k8s_info:
+    api_version: networking.k8s.io/v1
+    kind: Ingress
+  register: keycloak_ingress_routes
+
+- name: Refuse competing authentication routes in another namespace
+  ansible.builtin.assert:
+    that:
+      - item.metadata.namespace == keycloak_namespace or keycloak_hostname not in (item.spec.rules | default([]) | map(attribute='host') | list)
+    fail_msg: >-
+      The authentication hostname already has an ingress in another namespace.
+      Keep the existing keycloak_namespace, or retire the old route explicitly
+      before creating a fresh installation. Changing namespaces does not move data.
+  loop: "{{ keycloak_ingress_routes.resources }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+
+- name: Read the shared Keycloak installation
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_existing_deployment
+
+- name: Record whether the shared service is installed
+  ansible.builtin.set_fact:
+    keycloak_present: "{{ keycloak_existing_deployment.resources | length > 0 }}"
+
+- name: Require the cluster owner to install or update Keycloak
+  ansible.builtin.assert:
+    that:
+      - keycloak_present
+      - not (keycloak_upgrade | bool)
+    fail_msg: Install or update shared Keycloak from the cluster owner project first.
+  when: not (startup_cluster_managed | default(true) | bool)
+
+- name: Report an existing shared installation left unchanged
+  ansible.builtin.debug:
+    msg: >-
+      Shared Keycloak already exists in {{ keycloak_namespace }}. Keeping its
+      version and configuration. To apply reviewed changes, the cluster owner
+      sets keycloak_upgrade: true for an explicit keycloak deployment, then
+      removes that setting. Application realm/client deployment is separate.
+  when:
+    - keycloak_present
+    - not (keycloak_upgrade | bool)

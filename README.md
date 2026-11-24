@@ -19,6 +19,25 @@ application, follow the [CLI quickstart](https://github.com/Deploy-your-Startup/
 Contributor conventions live in [AGENTS.md](AGENTS.md); lasting design
 decisions are recorded in [docs/adr](docs/adr/README.md).
 
+## Shared Keycloak authentication
+
+Projects may opt into a shared Keycloak installation managed by the cluster
+owner. Each startup gets its own realm and confidential client by default;
+application deployment reuses the server and never upgrades it implicitly.
+Authentication uses separate persistent storage and retained credentials.
+
+The [Keycloak role](roles/keycloak/README.md) covers installation, explicit
+owner updates, TLS, diagnostics and independent backups. The
+[client role](roles/keycloak-client/README.md) configures realms, PKCE clients,
+optional passkeys and declared session policies. The
+[OAuth2 Proxy role](roles/oauth2-proxy/README.md#keycloak) consumes the generated
+client credentials without changing the existing Auth0 defaults.
+
+Adoption requires a release and a reviewed project deployment pin, followed by
+explicit project configuration; merging these roles enables no production
+service automatically. See [role distribution](docs/role-distribution.md) and
+[the authentication decision](docs/adr/0010-owner-managed-shared-keycloak.md).
+
 ## Available Workflows
 
 ### Generic Service Build and Deploy
@@ -476,6 +495,8 @@ Projects load shared roles from their pinned `.shared-roles` checkout:
 | --- | --- |
 | `postgres` | Local database; configure database credentials and storage placement in project group_vars. |
 | `cert-manager` | TLS certificates; configure the ACME solver and operator contact. |
+| [`keycloak`](roles/keycloak/README.md) | Cluster-owner-managed authentication with separate storage, explicit upgrades and backups. |
+| [`keycloak-client`](roles/keycloak-client/README.md) | Per-startup realms and confidential clients, optional passkeys and session policy. |
 | [`oauth2-proxy`](roles/oauth2-proxy/README.md) | OIDC reverse proxy; set `base_domain`, `auth_domain`, `auth_audience`, and Vault values `oauth2_proxy_client_id`, `oauth2_proxy_client_secret`, `oauth2_proxy_cookie_secret`. Guard the project's role import/include with `oauth2_proxy_enabled \| default(false)`. |
 | [`kpis`](roles/kpis/README.md) | Self-hosted, cookieless KPI tracking (Umami); set `base_domain`, `project_name`, `kpis_website_id`, and Vault values `kpis_db_password`, `kpis_app_secret`, `kpis_admin_password`. Guard the project's role import/include with `kpis_enabled \| default(false)`. |
 

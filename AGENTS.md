@@ -51,3 +51,10 @@ commit credentials. Ask before destructive or costly operations. Application
 template updates (`startup template update`) and shared deployment updates
 (`startup update`) stay separate; preserve application customizations and
 `deployment/group_vars`.
+
+## Shared authentication
+
+Keycloak is optional and managed by the cluster owner's project. Attached
+startups reuse it without installing or upgrading it; preserve its namespace,
+storage and credentials. Read [the authentication decision](docs/adr/0010-owner-managed-shared-keycloak.md)
+and the [role guide](roles/keycloak/README.md) before changing this lifecycle.
