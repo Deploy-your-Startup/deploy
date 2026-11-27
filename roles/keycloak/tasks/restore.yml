@@ -1,0 +1,90 @@
+---
+- name: Read the target Keycloak Deployment
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_restore_deployment
+
+- name: Require a target without a Keycloak Deployment
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_deployment.resources | length == 0
+    fail_msg: Restore into a fresh authentication target before deploying Keycloak.
+
+- name: Read the existing destination namespace
+  kubernetes.core.k8s_info:
+    kind: Namespace
+    name: "{{ keycloak_namespace }}"
+  register: keycloak_restore_namespace
+
+- name: Require existing targets to be dedicated to Keycloak
+  ansible.builtin.assert:
+    that:
+      - >-
+        keycloak_restore_namespace.resources | length == 0 or
+        (keycloak_restore_namespace.resources[0].metadata.labels | default({})).get('startup.deploy/service') == 'keycloak'
+    fail_msg: Choose a fresh namespace dedicated to Keycloak.
+
+- name: Create a private directory for this restore
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: startup-keycloak-restore-
+  register: keycloak_restore_stage
+
+- name: Restore the matching database and credentials
+  block:
+    - name: Stage the selected archive on the master
+      ansible.builtin.copy:
+        src: "{{ db_backup_file }}"
+        dest: "{{ keycloak_restore_stage.path }}/snapshot.tar.gz"
+        mode: "0600"
+        decrypt: false
+      no_log: true
+      diff: false
+
+    - name: Read only the credentials member from the archive
+      ansible.builtin.command:
+        argv: [tar, -xOzf, "{{ keycloak_restore_stage.path }}/snapshot.tar.gz", credentials.yml]
+      register: keycloak_restore_credentials_file
+      changed_when: false
+      no_log: true
+
+    - name: Validate the recovery Secret and original namespace
+      ansible.builtin.assert:
+        that:
+          - keycloak_archive_secret is mapping
+          - keycloak_archive_secret.apiVersion == 'v1'
+          - keycloak_archive_secret.kind == 'Secret'
+          - keycloak_archive_secret.metadata.name == 'keycloak'
+          - keycloak_archive_secret.metadata.namespace == keycloak_namespace
+          - keycloak_archive_secret.data is mapping
+          - keycloak_archive_secret.data.admin_username | b64decode | length > 0
+          - keycloak_archive_secret.data.admin_password | b64decode | length > 0
+          - keycloak_archive_secret.data.database_password | b64decode | length > 0
+      vars:
+        keycloak_archive_secret: "{{ keycloak_restore_credentials_file.stdout | from_yaml }}"
+      no_log: true
+
+    - name: Check that the archive contains a PostgreSQL custom-format dump
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        tar -xOzf "$SNAPSHOT" database.dump > "$DUMP"
+        test "$(head -c 5 "$DUMP")" = PGDMP
+      args:
+        executable: /bin/bash
+      environment:
+        SNAPSHOT: "{{ keycloak_restore_stage.path }}/snapshot.tar.gz"
+        DUMP: "{{ keycloak_restore_stage.path }}/database.dump"
+      changed_when: false
+
+    - name: Prepare an empty authentication target
+      ansible.builtin.include_tasks: restore-database.yml
+
+  always:
+    - name: Remove the staged archive and dump
+      ansible.builtin.file:
+        path: "{{ keycloak_restore_stage.path }}"
+        state: absent

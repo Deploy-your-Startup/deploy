@@ -1,0 +1,29 @@
+---
+- name: Recover shared authentication into a stopped Keycloak environment
+  hosts: "{{ keycloak_inventory_group | default('hcloud_type_master') }}:&hcloud_type_master"
+  gather_facts: false
+  run_once: true
+  tasks:
+    - name: Require the Keycloak owner and an explicit database archive
+      ansible.builtin.assert:
+        that:
+          - startup_keycloak_operator | default(false) | bool
+          - startup_cluster_managed | default(true) | bool
+          - keycloak_namespace is defined
+          - keycloak_namespace is match('^[a-z][a-z0-9-]{0,62}$')
+          - keycloak_namespace != (k8s_namespace | default('default'))
+          - restore_db | default(false) | bool
+          - not (restore_media | default(true) | bool)
+          - db_backup_file is defined
+          - db_backup_file is match('^/.+[.]tar[.]gz$')
+        fail_msg: Use the cluster owner and pass a Keycloak archive with --db-file and --no-restore-media.
+
+    - name: Prepare the Kubernetes client on the master
+      ansible.builtin.import_role:
+        name: kubernetes-client
+      tags: keycloak-prepare-client
+
+    - name: Recover the authentication database and credentials
+      ansible.builtin.import_role:
+        name: keycloak
+        tasks_from: restore.yml

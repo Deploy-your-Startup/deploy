@@ -13,7 +13,8 @@ playbook and group_vars. Authentication has its own namespace, PostgreSQL volume
 and generated recovery Secret. Attached projects may reuse the installation but
 cannot create or upgrade it. Normal deployments preserve an existing server;
 an explicit owner deployment with `keycloak_upgrade: true` applies reviewed
-updates. Removing an application never uninstalls shared authentication.
+updates. Reuse still checks workload, recovery Secret and ingress certificate
+readiness. Removing an application never uninstalls shared authentication.
 
 Each startup uses a separate realm and confidential PKCE S256 client by default.
 The client role retains users, registration policy and persisted credentials.
@@ -27,9 +28,11 @@ the fixed public HTTPS origin only on the private ingress path. Both require
 production DNS, certificates and routing to be verified independently.
 
 The cluster owner backs up the authentication database and recovery credentials
-separately. Losing a Secret for existing storage requires recovery, not automatic
-credential replacement. Keep the existing namespace and hostname during adoption;
-changing a namespace does not migrate data or users. Before retiring an owner
+separately. Restore uses the same archive to recover the Secret and transactionally
+import PostgreSQL before Keycloak is deployed on a fresh target. Losing a Secret
+for existing storage requires recovery, not automatic credential replacement.
+Keep the existing namespace and hostname during adoption; changing a namespace
+does not migrate data or users. Before retiring an owner
 project, transfer its operator settings and access to a successor. Cluster
 removal requires an explicit decision to migrate, stop or delete identity data.
 

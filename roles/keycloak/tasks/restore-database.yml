@@ -1,0 +1,101 @@
+---
+- name: Read any existing recovery Secret before provisioning
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_restore_existing_secret
+  no_log: true
+
+- name: Read existing authentication storage before provisioning
+  kubernetes.core.k8s_info:
+    kind: PersistentVolumeClaim
+    namespace: "{{ keycloak_namespace }}"
+    name: postgres
+  register: keycloak_restore_existing_storage
+
+- name: Read any destination PostgreSQL Deployment
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ keycloak_namespace }}"
+    name: postgres
+  register: keycloak_restore_existing_postgres
+
+- name: Read the retained authentication volume
+  kubernetes.core.k8s_info:
+    kind: PersistentVolume
+    name: "{{ keycloak_namespace }}-postgres"
+  register: keycloak_restore_existing_volume
+
+- name: Protect retained storage without its original claim
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_existing_volume.resources | length == 0 or keycloak_restore_existing_storage.resources | length == 1
+    fail_msg: The target has a retained authentication volume without its claim. Use a fresh recovery cluster.
+
+- name: Keep unrelated PostgreSQL workloads outside the recovery target
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_existing_postgres.resources | length == 0 or keycloak_restore_existing_storage.resources | length == 1
+    fail_msg: The target namespace has a PostgreSQL Deployment without dedicated authentication storage.
+
+- name: Require existing storage to have its own recovery Secret
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_existing_storage.resources | length == 0 or keycloak_restore_existing_secret.resources | length == 1
+    fail_msg: Existing authentication storage has no recovery Secret. Use a fresh target or recover its original credentials.
+
+- name: Preserve and validate existing credentials on a retry
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_existing_secret.resources[0].data == (keycloak_restore_credentials_file.stdout | from_yaml).data
+  when: keycloak_restore_existing_secret.resources | length == 1
+  no_log: true
+
+- name: Probe the destination database before reapplying storage
+  ansible.builtin.include_tasks: restore-empty-check.yml
+  when: keycloak_restore_existing_storage.resources | length == 1
+
+- name: Prepare the authentication namespace
+  ansible.builtin.import_tasks: namespace.yml
+
+- name: Recreate the recovery Secret without source cluster metadata
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      type: Opaque
+      metadata:
+        name: keycloak
+        namespace: "{{ keycloak_namespace }}"
+      data: "{{ (keycloak_restore_credentials_file.stdout | from_yaml).data }}"
+  when: keycloak_restore_existing_secret.resources | length == 0
+  no_log: true
+  diff: false
+
+- name: Read the recovered Keycloak credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_credentials
+  no_log: true
+
+- name: Create persistent PostgreSQL storage with the recovered credentials
+  ansible.builtin.import_tasks: database.yml
+
+- name: Require an empty destination before importing
+  ansible.builtin.import_tasks: restore-empty-check.yml
+
+- name: Import the Keycloak dump in one transaction
+  ansible.builtin.shell: |
+    set -euo pipefail
+    kubectl exec -i -n "$AUTH_NAMESPACE" deploy/postgres --       pg_restore -U keycloak -d keycloak --single-transaction --exit-on-error < "$DUMP"
+  args:
+    executable: /bin/bash
+  environment:
+    AUTH_NAMESPACE: "{{ keycloak_namespace }}"
+    DUMP: "{{ keycloak_restore_stage.path }}/database.dump"
+  no_log: true

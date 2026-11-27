@@ -1,0 +1,58 @@
+---
+- name: Read the shared recovery Secret
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+  register: keycloak_recovery_credentials
+  no_log: true
+
+- name: Require recoverable authentication credentials
+  ansible.builtin.assert:
+    that:
+      - keycloak_recovery_credentials.resources | length == 1
+    fail_msg: Restore the Keycloak Secret from backup before using the shared installation.
+
+- name: Wait for Keycloak to become available
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak
+    wait: true
+    wait_timeout: "{{ keycloak_ready_timeout }}"
+    wait_condition:
+      type: Available
+      status: "True"
+  register: keycloak_available_deployment
+
+- name: Require a ready Keycloak replica
+  ansible.builtin.assert:
+    that:
+      - keycloak_available_deployment.resources | length == 1
+      - keycloak_available_deployment.resources[0].status.readyReplicas | default(0) | int > 0
+    fail_msg: Shared Keycloak is unavailable. Inspect the workload with the keycloak-status tag.
+
+- name: Wait for the public certificate
+  kubernetes.core.k8s_info:
+    api_version: cert-manager.io/v1
+    kind: Certificate
+    namespace: "{{ keycloak_namespace }}"
+    name: keycloak-tls
+    wait: true
+    wait_timeout: "{{ keycloak_ready_timeout }}"
+    wait_condition:
+      type: Ready
+      status: "True"
+  register: keycloak_public_certificate
+  when: keycloak_tls_termination == 'ingress'
+
+- name: Require a ready public certificate
+  ansible.builtin.assert:
+    that:
+      - keycloak_public_certificate.resources | length == 1
+      - >-
+        keycloak_public_certificate.resources[0].status.conditions | default([]) |
+        selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+    fail_msg: The Keycloak certificate is missing or unready. Check DNS and the certificate issuer with the keycloak-status tag.
+  when: keycloak_tls_termination == 'ingress'

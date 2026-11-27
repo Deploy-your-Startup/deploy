@@ -81,7 +81,8 @@ def project_cluster(tmp_path):
         "Namespace//cert-manager": resource("Namespace", "cert-manager"),
         "HelmChart/kube-system/cert-manager": resource("HelmChart", "cert-manager", "kube-system", spec={"version": "existing"}),
         "Deployment/cert-manager/cert-manager": resource("Deployment", "cert-manager", "cert-manager", status={"readyReplicas": 1}),
-        "Certificate/authentication/keycloak-tls": resource("Certificate", "keycloak-tls", "authentication"),
+        "Certificate/authentication/keycloak-tls": resource("Certificate", "keycloak-tls", "authentication",
+            status={"conditions": [{"type": "Ready", "status": "True"}]}),
     }
     for name in ("issuers.cert-manager.io", "gatewayclasses.gateway.networking.k8s.io",
                  "gateways.gateway.networking.k8s.io", "httproutes.gateway.networking.k8s.io"):
@@ -261,6 +262,34 @@ def test_recovery_secret_loss_never_reinitializes_existing_authentication(projec
     result = deploy(tags="keycloak", keycloak_upgrade=True)
     assert result.returncode != 0
     assert "Restore the Keycloak Secret" in result.stdout
+    assert state.read_bytes() == snapshot
+
+
+@pytest.mark.parametrize("failure,diagnostic", [
+    ("recovery", "Restore the Keycloak Secret"),
+    ("workload", "Shared Keycloak is unavailable"),
+    ("certificate", "The Keycloak certificate is missing or unready"),
+])
+def test_reusing_incomplete_installation_fails_without_writes(project_cluster, failure, diagnostic):
+    # GIVEN a failed first install left a Deployment in the cluster.
+    deploy, state = project_cluster
+    assert deploy(tags="keycloak", keycloak_tls_termination="ingress").returncode == 0
+    objects = json.loads(state.read_text())
+    if failure == "recovery":
+        del objects["Secret/authentication/keycloak"]
+    elif failure == "workload":
+        objects["Deployment/authentication/keycloak"]["status"] = {"readyReplicas": 0}
+    else:
+        del objects["Certificate/authentication/keycloak-tls"]
+    state.write_text(json.dumps(objects, sort_keys=True))
+    snapshot = state.read_bytes()
+
+    # WHEN the owner repeats the normal command without forcing an upgrade.
+    result = deploy(tags="keycloak", keycloak_tls_termination="ingress")
+
+    # THEN the deployment reports the incomplete installation without writes.
+    assert result.returncode != 0
+    assert diagnostic in result.stdout
     assert state.read_bytes() == snapshot
 
 

@@ -92,6 +92,36 @@ Run this from the owner project with `startup_keycloak_operator: true` and
 custom-format dump and its recovery Secret with private filesystem permissions.
 Encrypt the archive in off-server backup storage and preserve Vault recovery
 material. The normal application backup does not include this separate database.
+Also preserve each application's `keycloak-client` Secret in encrypted backup
+storage if sessions must survive. After losing those Secrets, redeploy each
+affected startup with `keycloak-client` before OAuth2 Proxy to apply the new
+credentials. Users will need to sign in again.
+
+### Recover authentication on a fresh cluster
+
+Prepare the replacement cluster, then configure the owner project with the same
+Keycloak namespace and public hostname, and pin compatible Keycloak and PostgreSQL
+versions. Before the first Keycloak deploy, restore the matching snapshot from a
+trusted, decrypted local archive:
+
+```bash
+startup ansible restore --working-directory deployment --environment production \
+  --playbook roles/keycloak/files/restore-playbook.yml \
+  --backup-dir /private/keycloak-backup \
+  --db-file /private/keycloak-backup/startup-keycloak-backup-SNAPSHOT.tar.gz \
+  --no-restore-media --yes
+```
+
+The restore recreates the recovery Secret, provisions dedicated PostgreSQL storage
+and imports the database in one transaction. An existing Keycloak Deployment,
+populated database, conflicting Secret or orphaned authentication volume blocks
+recovery. Pause automatic application and Keycloak deployments for this target
+until the restore completes.
+
+After the restore succeeds, deploy the Keycloak service. Restore backed-up
+application client Secrets where available and redeploy each affected startup so
+its client and proxy are configured against the restored Keycloak. Verify
+discovery and an actual login through each application before moving traffic.
 
 `keycloak-client` creates the startup realm and a confidential client with exact
 callback URLs, PKCE S256 and direct password grants disabled. It preserves users

@@ -6,6 +6,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -19,6 +20,8 @@ from ansible.parsing.dataloader import DataLoader
 from ansible.template import Templar, trust_as_template
 import pytest
 import yaml
+
+from test_keycloak_project_integration import PROVIDER, resource
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -318,6 +321,69 @@ def test_invalid_session_policy_is_rejected_before_contacting_keycloak(tmp_path,
     assert "session" in result.stdout.lower()
 
 
+def provision_startups(stack, client_secrets):
+    directory = stack["temporary"]
+    modules = directory / "collections/ansible_collections/kubernetes/core/plugins/modules"
+    modules.mkdir(parents=True, exist_ok=True)
+    for name in ("k8s", "k8s_info"):
+        (modules / f"{name}.py").write_text(PROVIDER)
+
+    def encode(value):
+        return base64.b64encode(value.encode()).decode()
+
+    state = directory / "kubernetes.json"
+    if not state.exists():
+        port = int(stack["api"].rsplit(":", 1)[1])
+        resources = {
+            "Service/authentication/keycloak": resource(
+                "Service", "keycloak", "authentication",
+                spec={"clusterIP": "127.0.0.1", "ports": [{"port": port}]},
+            ),
+            "Secret/authentication/keycloak": resource(
+                "Secret", "keycloak", "authentication",
+                data={"admin_username": encode("startup-admin"), "admin_password": encode(stack["password"])},
+            ),
+        }
+        for realm, secret in client_secrets.items():
+            namespace = "app-" + realm
+            resources[f"Namespace//{namespace}"] = resource("Namespace", namespace)
+            resources[f"Secret/{namespace}/keycloak-client"] = {
+                "kind": "Secret",
+                "metadata": {"name": "keycloak-client", "namespace": namespace,
+                             "annotations": {"startup.deploy/realm": realm, "startup.deploy/client": realm}},
+                "data": {"OAUTH2_PROXY_CLIENT_SECRET": encode(secret)},
+            }
+        state.write_text(json.dumps(resources))
+        state.chmod(0o600)
+    playbook = directory / "provision.yml"
+    playbook.write_text(yaml.safe_dump([
+        {
+            "name": f"Deploy startup {realm}",
+            "hosts": "localhost", "connection": "local", "gather_facts": False,
+            "vars": {
+                "startup_cluster_managed": False,
+                "project_name": realm,
+                "k8s_namespace": "app-" + realm,
+                "keycloak_client_origin": f"https://app.example.test:{stack['port']}",
+            },
+            "tasks": [{"ansible.builtin.import_role": {"name": "keycloak-client"}, "tags": ["keycloak-client"]}],
+        }
+        for realm in client_secrets
+    ]))
+    result = subprocess.run(
+        [str(Path(sys.executable).parent / "ansible-playbook"), "-i", "localhost,", str(playbook),
+         "--tags", "keycloak-client"],
+        cwd=directory, capture_output=True, text=True, timeout=90,
+        env={**os.environ, "ANSIBLE_ROLES_PATH": str(ROOT / "roles"),
+             "ANSIBLE_COLLECTIONS_PATH": str(directory / "collections"),
+             "ANSIBLE_PYTHON_INTERPRETER": sys.executable,
+             "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
+             "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
+             "TEST_KUBERNETES_STATE": str(state), "NO_PROXY": "127.0.0.1,localhost"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def verify_backup_restore(stack):
     """Run the shipped backup playbook; only Kubernetes discovery/exec is a boundary."""
     directory = stack["temporary"]
@@ -325,13 +391,19 @@ def verify_backup_restore(stack):
     executable.mkdir()
     kubectl = executable / "kubectl"
     kubectl.write_text("#!" + sys.executable + "\n" + """
-import json, os, subprocess, sys
+import base64, json, os, subprocess, sys
 args = sys.argv[1:]
 if args[0] == 'exec':
-    raise SystemExit(subprocess.call(['docker', 'exec', os.environ['TEST_DB'], *args[args.index('--') + 1:]]))
+    stdin_args = ['-i'] if '-i' in args else []
+    raise SystemExit(subprocess.call(['docker', 'exec', *stdin_args, os.environ['TEST_DB'],
+                                     *args[args.index('--') + 1:]]))
 if args[:2] == ['get', 'secret']:
-    print(json.dumps({'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': 'keycloak'},
-                      'data': {'admin_password': 'c3ludGhldGljLWJhY2t1cC1jcmVkZW50aWFs'}}))
+    fields = {'admin_username': os.environ['KC_BOOTSTRAP_ADMIN_USERNAME'],
+              'admin_password': os.environ['KC_BOOTSTRAP_ADMIN_PASSWORD'],
+              'database_password': os.environ['KC_DB_PASSWORD']}
+    print(json.dumps({'apiVersion': 'v1', 'kind': 'Secret',
+                      'metadata': {'name': 'keycloak', 'namespace': 'authentication'},
+                      'data': {key: base64.b64encode(value.encode()).decode() for key, value in fields.items()}}))
     raise SystemExit(0)
 raise SystemExit(2)
 """)
@@ -352,7 +424,7 @@ raise SystemExit(2)
         str(Path(sys.executable).parent / "ansible-playbook"), "-i", str(inventory),
         str(ROOT / "roles/keycloak/files/backup-playbook.yml"), "--extra-vars", "@" + str(variables),
     ], env={
-        **os.environ, "PATH": str(executable) + os.pathsep + os.environ["PATH"],
+        **stack["environment"], "PATH": str(executable) + os.pathsep + os.environ["PATH"],
         "TEST_DB": stack["database"], "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
         "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
     }, capture_output=True, text=True, timeout=90)
@@ -361,24 +433,79 @@ raise SystemExit(2)
     assert snapshot.stat().st_mode & 0o777 == 0o600
     with tarfile.open(snapshot) as archive:
         assert set(archive.getnames()) == {"database.dump", "credentials.yml"}
-        dump = archive.extractfile("database.dump").read()
-        assert dump.startswith(b"PGDMP")
-        assert yaml.safe_load(archive.extractfile("credentials.yml"))["kind"] == "Secret"
-    stack["docker"]("exec", stack["database"], "createdb", "-U", "keycloak", "restored")
-    restored = subprocess.run([
-        "docker", "exec", "-i", stack["database"], "pg_restore", "-U", "keycloak", "-d", "restored",
-    ], input=dump, capture_output=True, check=False, timeout=60)
-    assert restored.returncode == 0, restored.stderr.decode()
-    count = stack["docker"]("exec", stack["database"], "psql", "-U", "keycloak",
-                           "-d", "restored", "-Atc",
-                           "SELECT count(*) FROM user_entity WHERE username='tester'").stdout.strip()
-    assert count == "1"
+        assert archive.extractfile("database.dump").read(5) == b"PGDMP"
+        recovery_secret = yaml.safe_load(archive.extractfile("credentials.yml"))
+        assert recovery_secret["kind"] == "Secret"
+
+    # The new destination has an empty database and no application in Kubernetes.
+    # Keep the original data under a separate name to distinguish it from the restore.
+    server = stack["name"] + "-server"
+    stack["docker"]("stop", server)
+    stack["docker"]("exec", stack["database"], "psql", "-v", "ON_ERROR_STOP=1",
+                    "-U", "keycloak", "-d", "postgres", "-c", "ALTER DATABASE keycloak RENAME TO original")
+    stack["docker"]("exec", stack["database"], "createdb", "-U", "keycloak", "keycloak")
+    state = directory / "recovery-kubernetes.json"
+    state.write_text(json.dumps({"Node//recovery": resource("Node", "recovery")}))
+    state.chmod(0o600)
+    variables.write_text(yaml.safe_dump({
+        "startup_keycloak_operator": True, "keycloak_namespace": "authentication",
+        "restore_db": True, "restore_media": False, "db_backup_file": str(snapshot),
+    }))
+
+    def restore():
+        return subprocess.run([
+            str(Path(sys.executable).parent / "ansible-playbook"), "-i", str(inventory),
+            str(ROOT / "roles/keycloak/files/restore-playbook.yml"), "--extra-vars", "@" + str(variables),
+            "--skip-tags", "keycloak-prepare-client",
+        ], cwd=directory, env={
+            **os.environ, "PATH": str(executable) + os.pathsep + os.environ["PATH"],
+            "TEST_DB": stack["database"], "TEST_KUBERNETES_STATE": str(state),
+            "ANSIBLE_ROLES_PATH": str(ROOT / "roles"),
+            "ANSIBLE_COLLECTIONS_PATH": str(directory / "collections"),
+            "ANSIBLE_LOCAL_TEMP": str(directory / "ansible"),
+            "ANSIBLE_REMOTE_TEMP": str(directory / "ansible-remote"),
+        }, capture_output=True, text=True, timeout=90)
+
+    restored = restore()
+    assert restored.returncode == 0, restored.stdout + restored.stderr
+    recovered = json.loads(state.read_text())
+    assert recovered["Secret/authentication/keycloak"]["data"] == recovery_secret["data"]
+    assert "Deployment/authentication/keycloak" not in recovered
+
+    # The second invocation refuses the populated database before applying resources.
+    repeated = restore()
+    assert repeated.returncode != 0
+    assert "The target Keycloak database is not empty" in repeated.stdout
+    assert json.loads(state.read_text()) == recovered
+    stack["docker"]("start", server)
+
+    # Wait through the same HTTPS gateway that OAuth2 Proxy will use. The
+    # test certificate is trusted here; the loopback address is only for DNS.
+    port = stack["port"]
+    tls = ssl.create_default_context(cafile=str(directory / "cert.pem"))
+    tls.check_hostname = False
+    gateway = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                           urllib.request.HTTPSHandler(context=tls))
+    discovery = "/realms/first/.well-known/openid-configuration"
+    probe = urllib.request.Request(f"https://127.0.0.1:{port}{discovery}",
+                                   headers={"Host": f"auth.example.test:{port}"})
+    for _ in range(60):
+        try:
+            with gateway.open(probe, timeout=2) as response:
+                assert json.load(response)["issuer"] == f"https://auth.example.test:{port}/realms/first"
+            break
+        except (OSError, urllib.error.URLError):
+            time.sleep(1)
+    else:
+        pytest.fail("The restored realm did not become discoverable through the HTTPS gateway")
+    return recovered["Secret/authentication/keycloak"]
 
 
 def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack):
     # GIVEN a real fresh PostgreSQL-backed Keycloak in production mode.
     client_secret = secrets.token_urlsafe(36)
-    configure(stack, "first", client_secret)
+    client_secrets = {"first": client_secret, "second": secrets.token_urlsafe(36)}
+    provision_startups(stack, client_secrets)
     token = request(stack["api"] + "/realms/master/protocol/openid-connect/token", {
         "grant_type": "password", "client_id": "admin-cli",
         "username": "startup-admin", "password": stack["password"],
@@ -394,9 +521,8 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
         "emailVerified": True, "firstName": "Test", "lastName": "User",
         "credentials": [{"type": "password", "value": test_password, "temporary": False}],
     }, token)
-    # WHEN the role is rerun and another startup is registered.
-    configure(stack, "first", client_secret)
-    configure(stack, "second", secrets.token_urlsafe(36))
+    # WHEN each attached startup repeats its own provisioning run.
+    provision_startups(stack, client_secrets)
     token = request(stack["api"] + "/realms/master/protocol/openid-connect/token", {
         "grant_type": "password", "client_id": "admin-cli",
         "username": "startup-admin", "password": stack["password"],
@@ -410,7 +536,21 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
     assert request(stack["api"] + "/admin/realms/first/clients/" + clients[0]["id"] + "/client-secret", token=token)["value"] == client_secret
     assert clients[0]["directAccessGrantsEnabled"] is False
     assert clients[0]["attributes"]["pkce.code.challenge.method"] == "S256"
-    verify_backup_restore(stack)
+    recovered_secret = verify_backup_restore(stack)
+
+    # Recover an application namespace that lost its client and cookie Secret.
+    state = stack["temporary"] / "kubernetes.json"
+    objects = json.loads(state.read_text())
+    objects["Secret/authentication/keycloak"] = recovered_secret
+    del objects["Secret/app-first/keycloak-client"]
+    port = stack["docker"]("port", stack["name"] + "-server", "8080/tcp").stdout.strip().rsplit(":", 1)[1]
+    objects["Service/authentication/keycloak"]["spec"]["ports"][0]["port"] = int(port)
+    state.write_text(json.dumps(objects))
+    provision_startups(stack, {"first": client_secret})
+    credentials = json.loads(state.read_text())["Secret/app-first/keycloak-client"]["data"]
+    recovered_client_secret = base64.b64decode(credentials["OAUTH2_PROXY_CLIENT_SECRET"]).decode()
+    assert recovered_client_secret != client_secret
+
     defaults = yaml.safe_load((ROOT / "roles/oauth2-proxy/defaults/main.yml").read_text())
     values = {
         **defaults, "base_domain": "app.example.test", "k8s_namespace": "first",
@@ -425,8 +565,8 @@ def test_real_keycloak_client_is_repeatable_and_oauth_proxy_login_isolated(stack
     }
     proxy = render("roles/oauth2-proxy/templates/deployment.yml", values)["spec"]["template"]["spec"]["containers"][0]
     stack["environment"].update(
-        OAUTH2_PROXY_CLIENT_ID="first", OAUTH2_PROXY_CLIENT_SECRET=client_secret,
-        OAUTH2_PROXY_COOKIE_SECRET=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
+        OAUTH2_PROXY_CLIENT_ID="first", OAUTH2_PROXY_CLIENT_SECRET=recovered_client_secret,
+        OAUTH2_PROXY_COOKIE_SECRET=base64.b64decode(credentials["OAUTH2_PROXY_COOKIE_SECRET"]).decode(),
     )
     container = stack["name"] + "-proxy"
     stack["docker"]("run", "-d", "--name", container, "--network", stack["name"],

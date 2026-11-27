@@ -1,0 +1,37 @@
+---
+- name: Check PostgreSQL for existing application objects
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - exec
+      - -n
+      - "{{ keycloak_namespace }}"
+      - deploy/postgres
+      - --
+      - psql
+      - -XAt
+      - -v
+      - ON_ERROR_STOP=1
+      - -U
+      - keycloak
+      - -d
+      - keycloak
+      - -c
+      - >-
+        SELECT EXISTS (
+          SELECT FROM pg_depend
+          WHERE refclassid = 'pg_namespace'::regclass
+          AND refobjid = 'public'::regnamespace
+          UNION ALL
+          SELECT FROM pg_namespace
+          WHERE nspname NOT IN ('public', 'information_schema')
+          AND nspname NOT LIKE 'pg\_%'
+        );
+  register: keycloak_restore_has_objects
+  changed_when: false
+
+- name: Refuse to overwrite a nonempty authentication database
+  ansible.builtin.assert:
+    that:
+      - keycloak_restore_has_objects.stdout == "f"
+    fail_msg: The target Keycloak database is not empty. Use a fresh recovery target.
