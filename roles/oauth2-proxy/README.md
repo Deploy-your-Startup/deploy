@@ -26,8 +26,9 @@ Set these variables in project `deployment/group_vars`:
 | --- | --- |
 | `oauth2_proxy_enabled` | `true` to include the role |
 | `base_domain` | Public base domain, for example `example.com` |
-| `auth_domain` | OIDC issuer URL without its trailing slash, for example `https://login.example.com` |
-| `auth_audience` | Intended API audience, for example `https://example.com/private_api` |
+| `oauth2_proxy_oidc_issuer_url` | Exact HTTPS issuer from the provider's discovery metadata. Existing configurations can use the default, which appends `/` to `auth_domain`. |
+| `oauth2_proxy_bearer_enabled` | Set to `false` for browser sessions only. The default is `true` for existing API clients. |
+| `auth_audience` | Intended API audience when using bearer authentication, for example `https://example.com/private_api` |
 | `oauth2_proxy_client_id` | OIDC application client ID, stored in Vault |
 | `oauth2_proxy_client_secret` | OIDC application client secret, stored in Vault |
 | `oauth2_proxy_cookie_secret` | Vault value: 16/24/32 raw bytes or URL-safe base64 decoding to that length |

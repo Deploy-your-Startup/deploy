@@ -199,6 +199,21 @@ def test_kpis_project_overrides_reach_manifests_and_public_api():
     assert templar(variables).template(trust_as_template(website['id'])) == variables['kpis_website_id']
 
 
+def test_oauth2_proxy_renders_browser_only_with_exact_realm_issuer():
+    issuer = 'https://auth.example.com/realms/startup'
+    variables = oauth2_proxy_variables(
+        oauth2_proxy_oidc_issuer_url=issuer,
+        oauth2_proxy_bearer_enabled=False,
+    )
+    del variables['auth_domain'], variables['auth_audience']
+    assert oauth2_proxy_guard_allows(variables)
+    deployment = yaml.safe_load(render('roles/oauth2-proxy/templates/deployment.yml', variables))
+    args = deployment['spec']['template']['spec']['containers'][0]['args']
+    assert f'--oidc-issuer-url={issuer}' in args
+    assert '--pass-authorization-header=true' in args
+    assert not any(arg.startswith(('--skip-jwt-bearer-tokens', '--extra-jwt-issuers')) for arg in args)
+
+
 @pytest.mark.parametrize('overrides', [
     {'kpis_website_id': 'not-a-uuid'}, {'kpis_website_id': ''},
     {'kpis_access_mode': 'automatic'},

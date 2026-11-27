@@ -30,10 +30,7 @@ spec:
         args:
           - --http-address=0.0.0.0:4180
           - --provider={{ oauth2_proxy_provider }}
-          # Auth0 puts a trailing slash in `iss` and oauth2-proxy compares the
-          # issuer literally, so the slash is not cosmetic. Discovery is left
-          # on: the local test stack has to disable it only because its mock
-          # provider answers to two different hostnames.
+          # Discovery and token verification use the published issuer verbatim.
           - --oidc-issuer-url={{ oauth2_proxy_oidc_issuer_url }}
           - --code-challenge-method=S256
           - --redirect-url=https://{{ oauth2_proxy_host }}/oauth2/callback
@@ -47,8 +44,10 @@ spec:
           # The native app path: a bearer token signed for the API audience is
           # verified against the JWKS and passed through, instead of being
           # answered with a login redirect an app cannot follow.
+{% if oauth2_proxy_bearer_enabled | bool %}
           - --skip-jwt-bearer-tokens=true
           - --extra-jwt-issuers={{ oauth2_proxy_extra_jwt_issuers }}
+{% endif %}
           # A cookie-authenticated browser sends no Authorization header, but
           # the backend may require one. Without this, browser
           # writes come back 401.
