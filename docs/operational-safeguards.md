@@ -19,6 +19,50 @@ behaviour, not version numbers.
 - Changing `hetzner_os_image` affects only newly created servers. In-place
   release upgrades go through `startup ansible os-upgrade`; see the README.
 
+## Ubuntu 26.04 containerd AppArmor compatibility
+
+The `containerd-apparmor` role temporarily backports
+[containerd PR 14487](https://github.com/containerd/containerd/pull/14487), also
+[backported to 2.3](https://github.com/containerd/containerd/pull/14590).
+Ubuntu forced profile stacking can prevent PostgreSQL processes from signalling
+each other and hang startup. The backport adds only the exact stacked peer's
+`signal` and `ptrace` rules to the containerd 2.3.4 default profile; AppArmor
+stays enforcing and the kernel hardening setting is not changed.
+
+On Ubuntu 26.04 with AppArmor enabled it runs before k3s installation/upgrades
+and before `update-vms` changes packages. An OS upgrade to 26.04 also prepares
+the persistent policy while still on Ubuntu 24.04; read-only compatibility
+checks cover the entire node selection before the first node is upgraded. It
+validates the profile with
+the distribution parser, loads it without restarting workloads, and verifies
+that it is enforcing. Repeated runs reload it to recover from partial failures.
+The profile in `/etc/apparmor.d/` persists across reboots. It supports the
+reviewed default rootful k3s runtime with containerd 2.3.4, 2.3.6 or 2.3.7
+(their upstream profiles are identical). Fresh installations require a reviewed
+k3s target; unknown runtime versions or a disabled AppArmor boot service stop
+before profile changes. Custom daemon confinement, RootlessKit,
+missing distribution includes and custom persistent profiles stop maintenance
+without replacing that policy. Custom policies need an operator-reviewed merge
+of the upstream rules. Other distributions and explicitly disabled AppArmor are
+left alone.
+
+A release and `startup update` adoption are required before existing users can
+run these tasks. Refresh roles with `startup ansible setup_ansible`, then run
+an approved maintenance operation; editing a project's pin alone installs no
+host policy. Hosts already protected by the identical hotfix are adopted. A database process
+already stuck before the correction may need a separately coordinated restart;
+loading this policy does not restart workloads.
+
+Remove this role and its installation/maintenance imports after a qualified
+stable k3s release embeds the upstream fix. On upgraded nodes, remove only our
+byte-identical persistent profile as part of that migration; preserve custom
+profiles. Coordinate a k3s restart so the native profile is loaded, then verify
+PostgreSQL startup, a database query, node reboot and enforcement. Removing the
+repository files alone does not remove an already installed host profile.
+The disposable-node tests use the real Ubuntu parser and Ansible tasks, with
+kernel loading simulated; they do not establish forced-stacking enforcement on
+a real Ubuntu 26.04 VM.
+
 ## Servers
 
 - `hetzner-server` creates servers with `force: true`, which lets the module

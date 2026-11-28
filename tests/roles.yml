@@ -4,6 +4,7 @@
   gather_facts: false
   roles:
     - cert-manager
+    - containerd-apparmor
     - docker-secrets
     - hetzner-cloud-controller-manager
     - hetzner-csi-provider
@@ -39,3 +40,5 @@
       ansible.builtin.import_tasks: ../roles/postgres/tasks/preflight.yml
     - name: Validate roles/os-upgrade/tasks/preflight.yml
       ansible.builtin.import_tasks: ../roles/os-upgrade/tasks/preflight.yml
+    - name: Validate roles/containerd-apparmor/tasks/profile.yml
+      ansible.builtin.import_tasks: ../roles/containerd-apparmor/tasks/profile.yml

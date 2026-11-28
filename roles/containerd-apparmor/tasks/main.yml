@@ -1,0 +1,27 @@
+---
+# Temporary backport of containerd/containerd#14487 (#14590 for 2.3).
+# Remove with the first qualified k3s release that embeds the upstream fix.
+- name: Gather OS facts for the containerd compatibility check
+  ansible.builtin.setup:
+    gather_subset: ['!all', '!min', distribution]
+
+- name: Inspect whether the kernel has AppArmor enabled
+  ansible.builtin.stat:
+    path: "{{ containerd_apparmor_root }}/sys/module/apparmor/parameters/enabled"
+  register: containerd_apparmor_enabled_file
+
+- name: Read the kernel AppArmor setting
+  ansible.builtin.slurp:
+    src: "{{ containerd_apparmor_root }}/sys/module/apparmor/parameters/enabled"
+  register: containerd_apparmor_enabled
+  when: containerd_apparmor_enabled_file.stat.exists
+
+- name: Protect Ubuntu containers from forced AppArmor stacking
+  ansible.builtin.import_tasks: profile.yml
+  when:
+    - ansible_facts.distribution == 'Ubuntu'
+    - >-
+      ansible_facts.distribution_version == '26.04' or
+      (ansible_facts.distribution_version == '24.04' and containerd_apparmor_target_release == '26.04')
+    - containerd_apparmor_enabled_file.stat.exists
+    - (containerd_apparmor_enabled.content | default('') | b64decode | trim) == 'Y'

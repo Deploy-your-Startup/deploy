@@ -95,3 +95,13 @@
   delegate_to: "{{ os_upgrade_master }}"
   changed_when: false
   when: os_upgrade_execute | bool
+
+# Check every selected node before any node enters the mutating serial play.
+# The role supports check mode: observations run, copies/reloads do not.
+- name: Preview containerd compatibility on every selected node
+  ansible.builtin.import_role:
+    name: containerd-apparmor
+  vars:
+    containerd_apparmor_target_release: "{{ os_upgrade_target }}"
+  check_mode: true
+  when: os_upgrade_execute | bool

@@ -59,6 +59,15 @@ startup ansible validate --playbook tests/roles.yml \
 Use a static test inventory to avoid provider lookups. The command uses local
 files without refreshing shared roles or resolving a Vault password.
 
+The containerd AppArmor scenarios run the shipped role and real Ubuntu 26.04
+policy parser on disposable Docker nodes. They check exact stacked-peer rules,
+idempotence, interrupted reload recovery, enforcement checks, custom-policy
+preservation and early refusal of unsupported runtime versions/configurations
+through installation and maintenance entries. Kernel policy loading is a
+boundary stand-in; forced stacking, PostgreSQL queries and reboot persistence
+still need qualification on a real Ubuntu 26.04 VM. See
+[the temporary backport and removal path](operational-safeguards.md#ubuntu-2604-containerd-apparmor-compatibility).
+
 ## CI workflows of this repository
 
 | Workflow | Runs |

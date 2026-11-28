@@ -1,0 +1,5 @@
+---
+# Filesystem and parser boundaries; defaults always address the real node.
+containerd_apparmor_root: ""
+containerd_apparmor_parser: /sbin/apparmor_parser
+containerd_apparmor_target_release: ""
